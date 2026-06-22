@@ -1,0 +1,4 @@
+# Logistics questions that ARE answerable from the brand KB (must return grounded results).
+how do I request a sample
+when is commission paid
+how do I get started

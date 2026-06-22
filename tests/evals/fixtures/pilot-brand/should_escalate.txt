@@ -1,0 +1,4 @@
+# Questions NOT grounded in the brand KB (must return empty → escalate, never fabricate).
+should I film a grwm or a tutorial
+can you give feedback on my video hook
+what is todays weather forecast

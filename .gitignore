@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets / local
+*.env
+.env
+!.env.example
+
+# Local data / Hermes profile artifacts (never committed)
+*.db
+*.sqlite
+*.sqlite3
+data/
+hermes/profiles/
+
+# OS
+.DS_Store

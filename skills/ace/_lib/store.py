@@ -1,0 +1,409 @@
+"""Embedded per-profile store for Ace (stdlib only).
+
+One SQLite database per Hermes profile holds a brand's ingested knowledge (documents + chunks
+with embeddings) **and** its structured data (creators, deals, interactions, feedback,
+moderation). Vector search is brute-force cosine in Python — at ~thousands of chunks per brand
+this is fast and keeps the dependency surface to the stdlib. (If a brand's corpus ever grows
+large, swap `search()` for sqlite-vec or Postgres/pgvector — the interface stays the same.)
+
+Resolving the active profile's data dir is a Phase-0 spike item; `db_path()` implements a
+sensible default driven by env vars that the `setup-brand` skill will set per profile.
+"""
+
+from __future__ import annotations
+
+import math
+import os
+import sqlite3
+import time
+from array import array
+from pathlib import Path
+
+from . import models
+from .models import Chunk, Creator, Deal, SearchHit
+
+# --- profile/data-dir resolution -------------------------------------------------------------
+
+DB_FILENAME = "ace.db"
+
+
+def data_dir() -> Path:
+    """Directory for the *active* profile's Ace data.
+
+    Resolution order (first set wins):
+      1. ``ACE_DATA_DIR``           — explicit override (set by setup-brand per profile)
+      2. ``HERMES_PROFILE_DIR``     — the running Hermes profile home → <home>/ace
+      3. ``./data``                 — local dev / test fallback
+    """
+    if env := os.environ.get("ACE_DATA_DIR"):
+        return Path(env)
+    if home := os.environ.get("HERMES_PROFILE_DIR"):
+        return Path(home) / "ace"
+    return Path.cwd() / "data"
+
+
+def db_path() -> Path:
+    return data_dir() / DB_FILENAME
+
+
+# --- connection + schema ---------------------------------------------------------------------
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS documents (
+    id          TEXT PRIMARY KEY,         -- stable source id (e.g. Drive file id)
+    title       TEXT NOT NULL,
+    path        TEXT,
+    updated_at  TEXT
+);
+CREATE TABLE IF NOT EXISTS chunks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id  TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    ord          INTEGER NOT NULL,
+    text         TEXT NOT NULL,
+    embedding    BLOB NOT NULL            -- array('f') packed floats
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(document_id);
+
+CREATE TABLE IF NOT EXISTS creators (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    handle           TEXT UNIQUE NOT NULL,
+    tiktok           TEXT,
+    email            TEXT,
+    role             TEXT,
+    onboarding_state TEXT DEFAULT 'new',
+    joined_at        TEXT,
+    last_active_at   TEXT
+);
+CREATE TABLE IF NOT EXISTS deals (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    creator_handle TEXT UNIQUE NOT NULL,
+    terms_json    TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS interactions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts            REAL NOT NULL,
+    channel       TEXT,
+    creator_handle TEXT,
+    question      TEXT,
+    answer        TEXT,
+    status        TEXT NOT NULL            -- answered | escalated | routed
+);
+CREATE TABLE IF NOT EXISTS feedback (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    interaction_id INTEGER REFERENCES interactions(id) ON DELETE CASCADE,
+    value          TEXT NOT NULL,          -- up | down
+    ts             REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS moderation_events (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             REAL NOT NULL,
+    creator_handle TEXT,
+    channel        TEXT,
+    tier           TEXT,                   -- friendly | formal | final
+    action         TEXT,
+    reason         TEXT
+);
+"""
+
+
+def connect(path: str | os.PathLike | None = None) -> sqlite3.Connection:
+    """Open (creating if needed) the profile DB and ensure the schema exists.
+
+    Pass ``":memory:"`` in tests for an isolated, disposable DB.
+    """
+    target = ":memory:" if path == ":memory:" else str(path or db_path())
+    if target != ":memory:":
+        Path(target).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(target)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.executescript(SCHEMA)
+    return conn
+
+
+# --- embedding (de)serialization + similarity ------------------------------------------------
+
+
+def pack_embedding(vec: list[float]) -> bytes:
+    return array("f", vec).tobytes()
+
+
+def unpack_embedding(blob: bytes) -> list[float]:
+    a = array("f")
+    a.frombytes(blob)
+    return list(a)
+
+
+def cosine(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return dot / (na * nb)
+
+
+# --- knowledge: documents + chunks -----------------------------------------------------------
+
+
+def upsert_document(
+    conn: sqlite3.Connection,
+    document_id: str,
+    title: str,
+    path: str | None = None,
+    updated_at: str | None = None,
+) -> None:
+    conn.execute(
+        """INSERT INTO documents (id, title, path, updated_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET title=excluded.title, path=excluded.path,
+                                          updated_at=excluded.updated_at""",
+        (document_id, title, path, updated_at),
+    )
+
+
+def replace_chunks(conn: sqlite3.Connection, document_id: str, chunks: list[Chunk]) -> None:
+    """Idempotent: clears prior chunks for the doc and inserts the new set."""
+    conn.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
+    conn.executemany(
+        "INSERT INTO chunks (document_id, ord, text, embedding) VALUES (?, ?, ?, ?)",
+        [(document_id, c.ord, c.text, pack_embedding(c.embedding)) for c in chunks],
+    )
+    conn.commit()
+
+
+def search(
+    conn: sqlite3.Connection,
+    query_embedding: list[float],
+    k: int = 5,
+    min_score: float = 0.25,
+) -> list[SearchHit]:
+    """Top-k chunks by cosine similarity, filtered by ``min_score``.
+
+    Returns ``[]`` when nothing clears the threshold — this empty result is the
+    never-fabricate hook: the answer skill must escalate rather than invent.
+    """
+    rows = conn.execute(
+        """SELECT c.text, c.embedding, c.document_id, c.ord, d.title
+           FROM chunks c JOIN documents d ON d.id = c.document_id"""
+    ).fetchall()
+    scored: list[SearchHit] = []
+    for r in rows:
+        score = cosine(query_embedding, unpack_embedding(r["embedding"]))
+        if score >= min_score:
+            scored.append(
+                SearchHit(
+                    text=r["text"],
+                    score=score,
+                    title=r["title"],
+                    document_id=r["document_id"],
+                    ord=r["ord"],
+                )
+            )
+    scored.sort(key=lambda h: h.score, reverse=True)
+    return scored[:k]
+
+
+# --- creators + deals ------------------------------------------------------------------------
+
+
+def upsert_creator(conn: sqlite3.Connection, creator: Creator) -> None:
+    conn.execute(
+        """INSERT INTO creators (handle, tiktok, email, role, onboarding_state, joined_at, last_active_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(handle) DO UPDATE SET
+             tiktok=COALESCE(excluded.tiktok, creators.tiktok),
+             email=COALESCE(excluded.email, creators.email),
+             role=COALESCE(excluded.role, creators.role),
+             onboarding_state=excluded.onboarding_state,
+             last_active_at=COALESCE(excluded.last_active_at, creators.last_active_at)""",
+        (
+            creator.handle,
+            creator.tiktok,
+            creator.email,
+            creator.role,
+            creator.onboarding_state,
+            creator.joined_at,
+            creator.last_active_at,
+        ),
+    )
+    conn.commit()
+
+
+def get_creator(conn: sqlite3.Connection, handle: str) -> Creator | None:
+    r = conn.execute("SELECT * FROM creators WHERE handle = ?", (handle,)).fetchone()
+    if not r:
+        return None
+    return Creator(
+        id=r["id"],
+        handle=r["handle"],
+        tiktok=r["tiktok"],
+        email=r["email"],
+        role=r["role"],
+        onboarding_state=r["onboarding_state"],
+        joined_at=r["joined_at"],
+        last_active_at=r["last_active_at"],
+    )
+
+
+def set_onboarding_state(conn: sqlite3.Connection, handle: str, state: str) -> None:
+    conn.execute(
+        "UPDATE creators SET onboarding_state = ? WHERE handle = ?", (state, handle)
+    )
+    conn.commit()
+
+
+def mark_active(conn: sqlite3.Connection, handle: str, ts: float | None = None) -> None:
+    conn.execute(
+        "UPDATE creators SET last_active_at = ? WHERE handle = ?",
+        (str(ts if ts is not None else time.time()), handle),
+    )
+    conn.commit()
+
+
+def list_inactive_creators(
+    conn: sqlite3.Connection,
+    since_ts: float,
+    onboarding_states: tuple[str, ...] = ("complete",),
+) -> list[Creator]:
+    """Creators whose last activity is before ``since_ts`` (or never), in the given states.
+
+    Used by `nudge-inactive`: e.g. no engagement 48h after onboarding → gentle nudge;
+    still inactive at 7 days → flag the team. ``last_active_at`` is stored as a stringified epoch.
+    """
+    placeholders = ",".join("?" for _ in onboarding_states)
+    rows = conn.execute(
+        f"""SELECT * FROM creators
+            WHERE onboarding_state IN ({placeholders})
+              AND (last_active_at IS NULL OR CAST(last_active_at AS REAL) < ?)""",
+        (*onboarding_states, since_ts),
+    ).fetchall()
+    return [
+        Creator(
+            id=r["id"], handle=r["handle"], tiktok=r["tiktok"], email=r["email"], role=r["role"],
+            onboarding_state=r["onboarding_state"], joined_at=r["joined_at"],
+            last_active_at=r["last_active_at"],
+        )
+        for r in rows
+    ]
+
+
+def recent_moderation_count(
+    conn: sqlite3.Connection, handle: str, since_ts: float
+) -> int:
+    """How many moderation events this creator has accrued since ``since_ts`` (drives tiering)."""
+    return conn.execute(
+        "SELECT COUNT(*) n FROM moderation_events WHERE creator_handle = ? AND ts >= ?",
+        (handle, since_ts),
+    ).fetchone()["n"]
+
+
+def upsert_deal(conn: sqlite3.Connection, deal: Deal) -> None:
+    import json
+
+    conn.execute(
+        """INSERT INTO deals (creator_handle, terms_json) VALUES (?, ?)
+           ON CONFLICT(creator_handle) DO UPDATE SET terms_json=excluded.terms_json""",
+        (deal.creator_handle, json.dumps(deal.terms)),
+    )
+    conn.commit()
+
+
+def get_deal(conn: sqlite3.Connection, creator_handle: str) -> Deal | None:
+    import json
+
+    r = conn.execute(
+        "SELECT * FROM deals WHERE creator_handle = ?", (creator_handle,)
+    ).fetchone()
+    if not r:
+        return None
+    return Deal(id=r["id"], creator_handle=r["creator_handle"], terms=json.loads(r["terms_json"]))
+
+
+# --- interactions / feedback / moderation (metrics + digest) ---------------------------------
+
+
+def log_interaction(
+    conn: sqlite3.Connection,
+    *,
+    status: str,
+    channel: str | None = None,
+    creator_handle: str | None = None,
+    question: str | None = None,
+    answer: str | None = None,
+    ts: float | None = None,
+) -> int:
+    cur = conn.execute(
+        """INSERT INTO interactions (ts, channel, creator_handle, question, answer, status)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (ts or time.time(), channel, creator_handle, question, answer, status),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def log_feedback(
+    conn: sqlite3.Connection, interaction_id: int, value: str, ts: float | None = None
+) -> None:
+    if value not in ("up", "down"):
+        raise ValueError("feedback value must be 'up' or 'down'")
+    conn.execute(
+        "INSERT INTO feedback (interaction_id, value, ts) VALUES (?, ?, ?)",
+        (interaction_id, value, ts or time.time()),
+    )
+    conn.commit()
+
+
+def record_moderation(
+    conn: sqlite3.Connection,
+    *,
+    tier: str,
+    action: str,
+    creator_handle: str | None = None,
+    channel: str | None = None,
+    reason: str | None = None,
+    ts: float | None = None,
+) -> None:
+    conn.execute(
+        """INSERT INTO moderation_events (ts, creator_handle, channel, tier, action, reason)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (ts or time.time(), creator_handle, channel, tier, action, reason),
+    )
+    conn.commit()
+
+
+def metrics_since(conn: sqlite3.Connection, since_ts: float) -> dict:
+    """Aggregate counts for the daily digest / metrics, for interactions at/after ``since_ts``."""
+    rows = conn.execute(
+        "SELECT status, COUNT(*) n FROM interactions WHERE ts >= ? GROUP BY status",
+        (since_ts,),
+    ).fetchall()
+    by_status = {r["status"]: r["n"] for r in rows}
+    answered = by_status.get(models.ANSWERED, 0)
+    escalated = by_status.get(models.ESCALATED, 0)
+    routed = by_status.get(models.ROUTED, 0)
+    total = answered + escalated + routed
+
+    fb = conn.execute(
+        """SELECT value, COUNT(*) n FROM feedback WHERE ts >= ? GROUP BY value""",
+        (since_ts,),
+    ).fetchall()
+    by_fb = {r["value"]: r["n"] for r in fb}
+    up, down = by_fb.get("up", 0), by_fb.get("down", 0)
+
+    mod = conn.execute(
+        "SELECT COUNT(*) n FROM moderation_events WHERE ts >= ?", (since_ts,)
+    ).fetchone()["n"]
+
+    return {
+        "total": total,
+        "answered": answered,
+        "escalated": escalated,
+        "routed": routed,
+        "answer_rate": round(answered / total, 3) if total else 0.0,
+        "thumbs_up": up,
+        "thumbs_down": down,
+        "thumbs_up_pct": round(up / (up + down), 3) if (up + down) else None,
+        "moderation_actions": mod,
+    }
