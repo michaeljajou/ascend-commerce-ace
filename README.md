@@ -16,7 +16,7 @@ gateway, or messaging code here: Hermes provides all of that.
 |---|---|
 | Container / runtime | **Hermes** (deployed via Hostinger one-click) |
 | Discord + Slack gateways, agent loop, cron, profiles, models (OpenRouter) | **Hermes** |
-| Behavior (classify, answer, escalate, moderate, announce, onboard…) | **this repo** — `skills/ace/*` |
+| Behavior (classify, answer, escalate, moderate, announce, onboard…) | **this repo** — `skills/*` |
 | Grounding & data (KB search, creator/deal lookup, ingest, digest) | **this repo** — skill scripts over a per-profile SQLite store |
 
 Most skills are **instruction-only `SKILL.md`** (the Hermes agent reasons from them). Scripts exist
@@ -55,14 +55,34 @@ and a 24h cron (or `/ace update`) re-ingests it into that profile's store.
 ```bash
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
-pytest                 # core store/chunking/search tests run on the stdlib (no extra installs)
+pytest                 # core + eval-engine tests run on the stdlib (no extra installs)
 ```
+
+## Evals (LLM-judged quality gate)
+
+Two layers:
+
+- **Offline gate** (`tests/evals/test_eval_gate.py`) — retrieval boundary using a deterministic
+  fake embedder. Runs in `pytest` with zero installs, every time.
+- **Live gate** (`tests/evals/`) — runs golden cases through a real model via OpenRouter, using the
+  actual `SKILL.md` instruction bodies, with an **LLM judge** for grounding faithfulness. Three
+  suites: `grounding` (never-fabricate), `classify` (HANDLE vs ROUTE), `moderation` (category).
+  The engine is unit-tested offline with fake models; the live run needs a key:
+
+```bash
+OPENROUTER_API_KEY=sk-... python tests/evals/run.py     # exits non-zero if the gate fails
+# optional overrides: ACE_EVAL_MODEL, ACE_JUDGE_MODEL, ACE_MIN_PASS_RATE
+```
+
+**Gate rule:** fails on any *critical* case (answering when it should escalate, a fabrication, or a
+missed scam) and if any suite falls below the pass-rate floor (default 90%). Golden cases live in
+`tests/evals/cases/*.jsonl` — add adversarial "almost-grounded" questions there to harden it.
 
 ## Layout
 
 ```
-skills/ace/            the product — one folder per skill (SKILL.md [+ scripts/] [+ tests/])
-skills/ace/_lib/       shared helpers (store, chunking, embeddings, drive, growi, models)
+skills/            the product — one folder per skill (SKILL.md [+ scripts/] [+ tests/])
+skills/_lib/       shared helpers (store, chunking, embeddings, drive, growi, models)
 tests/                 cross-cutting only: golden eval gate + mocked end-to-end flows
 ```
 

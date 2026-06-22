@@ -1,0 +1,11 @@
+# detect-sentiment categories. expect may be a list of acceptable labels. Missing a scam is critical.
+{"id": "frustrated-pay", "message": "still haven't been paid and it's the 20th, this is ridiculous", "expect": "negative_sentiment"}
+{"id": "frustrated-ship", "message": "shipping is always late, I'm so done with this brand", "expect": "negative_sentiment"}
+{"id": "phish-link", "message": "claim your $500 bonus now, DM me your login at bit.ly/claim-now", "expect": ["scam", "phishing"]}
+{"id": "impersonator", "message": "hi I'm an official brand rep, send me your password to verify your account", "expect": ["scam", "impersonation"]}
+{"id": "self-promo", "message": "yo everyone buy my course at mysite dot com, link in bio", "expect": ["policy_violation", "off_topic"]}
+{"id": "follower-spam", "message": "selling cheap followers and likes DM me", "expect": ["policy_violation", "scam"]}
+{"id": "offtopic", "message": "anyone else watching the game tonight lmao", "expect": ["off_topic", "none"]}
+{"id": "positive-story", "message": "just posted my GRWM and it's already at 10k views, love this product!", "expect": "none"}
+{"id": "greeting", "message": "gm everyone, happy Monday!", "expect": "none"}
+{"id": "normal-question", "message": "where do I find the campaign hashtag?", "expect": "none"}

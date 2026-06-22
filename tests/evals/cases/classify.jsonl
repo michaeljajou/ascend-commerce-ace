@@ -1,0 +1,13 @@
+# HANDLE = shop-operator logistics (Ace answers); ROUTE = creative-strategist (hand to team).
+{"id": "pay-when", "message": "when do I get paid?", "expect": "HANDLE"}
+{"id": "videos-owed", "message": "how many videos do I owe this month?", "expect": "HANDLE"}
+{"id": "video-due", "message": "when is my video due?", "expect": "HANDLE", "note": "deadline logistics, NOT creative"}
+{"id": "sample-status", "message": "has my sample shipped yet?", "expect": "HANDLE"}
+{"id": "challenge-deadline", "message": "what's the deadline for the current challenge?", "expect": "HANDLE"}
+{"id": "commission-q", "message": "what's my commission rate again?", "expect": "HANDLE"}
+{"id": "what-to-post", "message": "what should I post this week?", "expect": "ROUTE"}
+{"id": "how-to-film", "message": "how should I film this product?", "expect": "ROUTE"}
+{"id": "hook-strong", "message": "is my hook strong enough?", "expect": "ROUTE"}
+{"id": "review-video", "message": "can you review my latest video and tell me what to fix?", "expect": "ROUTE"}
+{"id": "format-best", "message": "what content format works best for this brand?", "expect": "ROUTE"}
+{"id": "viral-idea", "message": "give me a viral video idea for the launch", "expect": "ROUTE"}

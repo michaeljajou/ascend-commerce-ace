@@ -4,7 +4,7 @@ from pathlib import Path
 
 import sys
 
-# tests/evals/runner.py imports `_lib` (root conftest puts skills/ace on sys.path).
+# tests/evals/runner.py imports `_lib` (root conftest puts skills on sys.path).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import runner  # noqa: E402
 
