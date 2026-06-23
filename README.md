@@ -34,9 +34,18 @@ Hermes itself is provided by the Hostinger one-click deploy. Then, **once per He
 git clone <this-repo> ace && cd ace && ./install.sh
 ```
 
-`./install.sh` installs the bundle into the orchestrator (defaults to **Hermes**, the only one
-supported): `hermes skills install <repo>` then the script-only deps from `requirements-skills.txt`.
-Use `./install.sh --dry-run` to preview, `--orchestrator <name>` to target another (when added).
+`./install.sh` registers this repo's `skills/` directory with Hermes as an **`external_dirs`** source
+(in `~/.hermes/config.yaml`) and installs the script-only deps from `requirements-skills.txt`. Hermes
+then discovers all skills **in place** — there's no per-skill copy, `skills/_lib` stays a sibling for
+the scripts to import (Hermes ignores it as a skill since it starts with `_`), and **updates are just
+`git pull`**. Keep the clone where it is — Hermes loads the skills from there.
+
+Use `./install.sh --dry-run` to preview, `--no-deps` to skip the pip step, `--orchestrator <name>` to
+target another orchestrator (when one's added).
+
+> Why not `hermes skills install`? That command installs **one** skill at a time (from a tap/URL) and
+> *copies* it into `~/.hermes/skills/` — it can't take a whole multi-skill repo, and it would strand
+> our shared `skills/_lib`. `external_dirs` is Hermes' mechanism for loading your own skills directory.
 
 ## Set up a brand (operator)
 

@@ -1,8 +1,8 @@
 """Tests for the bundle installer (install.sh).
 
-We shell out to the real bash script. It's builtin-only before any orchestrator/
-deps command, so we can run it under a hermetic PATH to exercise dispatch without
-touching the machine's real tooling.
+We shell out to the real bash script. It registers the repo's skills/ dir in
+Hermes' config under skills.external_dirs (live, in-place) rather than copying
+skills — so Hermes discovers all skills at once and skills/_lib stays a sibling.
 """
 
 import shutil
@@ -13,9 +13,14 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "install.sh"
+SKILLS_DIR = REPO / "skills"
 BASH = shutil.which("bash")
 
 pytestmark = pytest.mark.skipif(BASH is None, reason="bash not available")
+
+# a python that has PyYAML, for the real (non-dry-run) config merge
+_VENV_PY = REPO / ".venv" / "bin" / "python"
+ACE_PYTHON = str(_VENV_PY) if _VENV_PY.exists() else (shutil.which("python3") or "python3")
 
 
 def run(args, path=None, extra_env=None):
@@ -32,30 +37,32 @@ def out(r):
     return r.stdout + r.stderr
 
 
+# ── dry-run dispatch ────────────────────────────────────────────────────────────
+
 def test_defaults_to_hermes():
     r = run(["--dry-run", "--repo", str(REPO)])
     assert r.returncode == 0, out(r)
-    assert "hermes skills install" in out(r)
-    assert str(REPO) in out(r)
+    assert "external_dirs" in out(r)
+    assert str(SKILLS_DIR) in out(r)
 
 
 def test_explicit_orchestrator_flag():
     r = run(["--orchestrator", "hermes", "--dry-run", "--repo", str(REPO)])
     assert r.returncode == 0, out(r)
-    assert "hermes skills install" in out(r)
+    assert "external_dirs" in out(r)
 
 
 def test_env_var_selects_orchestrator():
     r = run(["--dry-run", "--repo", str(REPO)], extra_env={"ACE_ORCHESTRATOR": "hermes"})
     assert r.returncode == 0, out(r)
-    assert "hermes skills install" in out(r)
+    assert "external_dirs" in out(r)
 
 
-def test_dry_run_does_not_require_hermes_cli():
-    # empty PATH → no hermes binary, but --dry-run must still succeed (warn, not die)
-    r = run(["--dry-run", "--repo", str(REPO)], path="")
+def test_dry_run_changes_nothing(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    r = run(["--dry-run", "--repo", str(REPO), "--hermes-config", str(cfg)])
     assert r.returncode == 0, out(r)
-    assert "hermes skills install" in out(r)
+    assert not cfg.exists()  # dry-run must not write
 
 
 def test_unsupported_orchestrator_errors():
@@ -74,3 +81,44 @@ def test_help_lists_supported_orchestrators():
     r = run(["--help"])
     assert r.returncode == 0
     assert "hermes" in out(r)
+
+
+# ── real config registration ────────────────────────────────────────────────────
+
+def test_registers_external_dir_in_fresh_config(tmp_path):
+    cfg = tmp_path / "hermes" / "config.yaml"
+    r = run(
+        ["--no-deps", "--repo", str(REPO), "--hermes-config", str(cfg)],
+        extra_env={"ACE_PYTHON": ACE_PYTHON},
+    )
+    assert r.returncode == 0, out(r)
+    assert cfg.exists()
+    import yaml  # available in the test env
+
+    data = yaml.safe_load(cfg.read_text())
+    assert data["skills"]["external_dirs"] == [str(SKILLS_DIR)]
+
+
+def test_registration_is_idempotent(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    args = ["--no-deps", "--repo", str(REPO), "--hermes-config", str(cfg)]
+    env = {"ACE_PYTHON": ACE_PYTHON}
+    assert run(args, extra_env=env).returncode == 0
+    assert run(args, extra_env=env).returncode == 0  # second run
+    assert cfg.read_text().count(str(SKILLS_DIR)) == 1  # no duplicate
+
+
+def test_preserves_existing_config(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("model: openrouter/anthropic/claude-sonnet-4-6\nskills:\n  external_dirs:\n    - /other/skills\n")
+    r = run(
+        ["--no-deps", "--repo", str(REPO), "--hermes-config", str(cfg)],
+        extra_env={"ACE_PYTHON": ACE_PYTHON},
+    )
+    assert r.returncode == 0, out(r)
+    import yaml
+
+    data = yaml.safe_load(cfg.read_text())
+    assert data["model"] == "openrouter/anthropic/claude-sonnet-4-6"  # untouched
+    assert "/other/skills" in data["skills"]["external_dirs"]  # preserved
+    assert str(SKILLS_DIR) in data["skills"]["external_dirs"]  # added

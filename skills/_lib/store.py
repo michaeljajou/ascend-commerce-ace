@@ -6,8 +6,9 @@ interactions, feedback, and moderation events (+ metrics derived from them).
 Brand *knowledge* (brief/FAQ/commission/etc.) is NOT here — it lives as a structured YAML file the
 agent reads directly (see ``knowledge.py``). This store is for things that change at runtime.
 
-Resolving the active profile's data dir is a Phase-0 spike item; `data_dir()` implements a sensible
-default driven by env vars that `setup-brand` will set per profile.
+The active tenant's data dir comes from ``ACE_DATA_DIR`` (the bundle's own contract, set per tenant
+by the setup skill). The core stays orchestrator-agnostic and never reads orchestrator-specific env
+vars — mapping a given orchestrator's per-tenant home to ``ACE_DATA_DIR`` is the setup adapter's job.
 """
 
 from __future__ import annotations
@@ -26,17 +27,18 @@ DB_FILENAME = "ace.db"
 
 
 def data_dir() -> Path:
-    """Directory for the *active* profile's Ace data (DB + knowledge file).
+    """Directory for the *active* tenant's Ace data (DB + knowledge file).
 
     Resolution order (first set wins):
-      1. ``ACE_DATA_DIR``        — explicit override (set by setup-brand per profile)
-      2. ``HERMES_PROFILE_DIR``  — the running Hermes profile home → <home>/ace
-      3. ``./data``              — local dev / test fallback
+      1. ``ACE_DATA_DIR`` — the bundle's own contract; set per tenant by the setup skill
+      2. ``./data``       — local dev / test fallback
+
+    Orchestrator-agnostic by design: the core reads only ``ACE_DATA_DIR``. For Hermes, ``setup-brand``
+    derives the profile path and writes ``ACE_DATA_DIR`` into the profile's ``.env``; porting to
+    another orchestrator means a different setup adapter, not a change here.
     """
     if env := os.environ.get("ACE_DATA_DIR"):
         return Path(env)
-    if home := os.environ.get("HERMES_PROFILE_DIR"):
-        return Path(home) / "ace"
     return Path.cwd() / "data"
 
 

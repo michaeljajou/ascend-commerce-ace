@@ -39,9 +39,13 @@ there is no ingest/embedding step.
    python ${HERMES_SKILL_DIR}/scripts/setup.py --spec <spec.json>
    ```
    This writes `config.yaml` (channel scoping + model + knowledge_file pointer), `SOUL.md`
-   (voice + locked rules), `cronjobs.yaml` (recurring jobs targeted at this brand's channels).
+   (voice + locked rules), `cronjobs.yaml` (recurring jobs targeted at this brand's channels), and
+   merges **`ACE_DATA_DIR=<profile>/ace`** into the profile `.env`. That env var is the bundle's
+   orchestrator-agnostic data-dir contract — `store.py` and `get-knowledge` read only `ACE_DATA_DIR`;
+   this skill is the one place that maps Hermes' profile path onto it.
 3. Activate the cron jobs (accept blueprint suggestions or register from `cronjobs.yaml`).
-4. Ensure the brand's **`knowledge.yaml`** is present in the profile data dir, then validate it loads:
+4. Ensure the brand's **`knowledge.yaml`** is present in the data dir (`<profile>/ace`, = `ACE_DATA_DIR`),
+   then validate it loads:
    ```
    python ${HERMES_SKILL_DIR}/../get-knowledge/scripts/get.py --section brand
    ```

@@ -85,6 +85,23 @@ def test_write_profile_roundtrips_config(tmp_path):
     assert any(j["skill"] == "daily-digest" for j in cron)
 
 
+def test_write_profile_sets_ace_data_dir_in_env(tmp_path):
+    written = setup.write_profile(make_spec(), tmp_path)
+    env_text = Path(written["env"]).read_text()
+    assert f"ACE_DATA_DIR={tmp_path.resolve() / 'ace'}" in env_text
+    assert written["data_dir"] == str((tmp_path / "ace").resolve())
+
+
+def test_ensure_env_preserves_existing_and_is_idempotent(tmp_path):
+    (tmp_path / ".env").write_text("DISCORD_TOKEN=abc123\n", encoding="utf-8")
+    setup.ensure_env(tmp_path, {"ACE_DATA_DIR": "/data/ace"})
+    setup.ensure_env(tmp_path, {"ACE_DATA_DIR": "/data/ace"})  # again → no dup
+    text = (tmp_path / ".env").read_text()
+    assert "DISCORD_TOKEN=abc123" in text          # untouched
+    assert text.count("ACE_DATA_DIR=") == 1        # idempotent
+    assert "ACE_DATA_DIR=/data/ace" in text
+
+
 def test_no_post_target_skips_weekly_reminders():
     spec = make_spec()
     spec["discord"]["channels"] = {"community-chat": "FULL_ACTIVE"}  # no POST_* channels

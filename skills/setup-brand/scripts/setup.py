@@ -5,6 +5,12 @@ Pure builders (validated + unit-tested) turn a brand spec into the per-profile a
   - config.yaml      Discord channel scoping + model/provider + brand ids   (JSON content; JSON is valid YAML)
   - SOUL.md          brand voice + the locked behavioral rules
   - cronjobs.yaml    the recurring jobs with this brand's channel targets    (JSON content)
+  - .env  (merged)   ACE_DATA_DIR=<profile>/ace — the data-dir contract store.py/knowledge.py read
+
+This is the Hermes **adapter**: the bundle's core stays orchestrator-agnostic (it reads only
+``ACE_DATA_DIR``), and this skill is the one place that knows Hermes — it derives the profile's data
+path and writes ``ACE_DATA_DIR`` into the profile ``.env``. Porting to another orchestrator means a
+different setup adapter, not changes to store.py or any behavior skill.
 
 The profile must already exist (a Hermes-CLI step attaches the bot/Slack tokens). This skill
 does NOT create the profile. Brand knowledge is a YAML file the team maintains in the profile (read
@@ -132,6 +138,25 @@ def build_cronjobs(spec: dict) -> list[dict]:
     return jobs
 
 
+def ensure_env(profile_dir: str | Path, updates: dict[str, str]) -> str:
+    """Idempotently set KEY=VALUE lines in the profile's .env, preserving existing entries (tokens)."""
+    env_path = Path(profile_dir) / ".env"
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    index = {}
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if s and not s.startswith("#") and "=" in s:
+            index[s.split("=", 1)[0].strip()] = i
+    for key, value in updates.items():
+        new_line = f"{key}={value}"
+        if key in index:
+            lines[index[key]] = new_line
+        else:
+            lines.append(new_line)
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(env_path)
+
+
 def write_profile(spec: dict, profile_dir: str | Path) -> dict:
     validate_spec(spec)
     profile = Path(profile_dir)
@@ -143,7 +168,16 @@ def write_profile(spec: dict, profile_dir: str | Path) -> dict:
     config_path.write_text(json.dumps(build_config(spec), indent=2), encoding="utf-8")
     cron_path.write_text(json.dumps(build_cronjobs(spec), indent=2), encoding="utf-8")
     soul_path.write_text(render_soul(spec), encoding="utf-8")
-    return {"config": str(config_path), "soul": str(soul_path), "cronjobs": str(cron_path)}
+    # The agnostic seam: point the core at this profile's data dir via ACE_DATA_DIR (merged, not clobbered).
+    data_dir = (profile / "ace").resolve()
+    env_path = ensure_env(profile, {"ACE_DATA_DIR": str(data_dir)})
+    return {
+        "config": str(config_path),
+        "soul": str(soul_path),
+        "cronjobs": str(cron_path),
+        "env": env_path,
+        "data_dir": str(data_dir),
+    }
 
 
 def _load_spec(arg: str) -> dict:
@@ -156,12 +190,16 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(description="Configure a brand inside its Hermes profile.")
     ap.add_argument("--spec", required=True, help="path to a brand spec JSON file (or inline JSON)")
-    ap.add_argument("--profile-dir", default=os.environ.get("HERMES_PROFILE_DIR", "./profile"))
+    # When a profile runs, Hermes sets HERMES_HOME to that profile's dir — the right default here.
+    ap.add_argument("--profile-dir", default=os.environ.get("HERMES_HOME", "./profile"))
     args = ap.parse_args(argv)
 
     spec = _load_spec(args.spec)
     written = write_profile(spec, args.profile_dir)
-    print(json.dumps({"written": written, "next": "ensure knowledge.yaml is present; validate with get-knowledge"}))
+    print(json.dumps({
+        "written": written,
+        "next": f"place knowledge.yaml in {written['data_dir']} (ACE_DATA_DIR); validate with get-knowledge",
+    }))
     return 0
 
 
