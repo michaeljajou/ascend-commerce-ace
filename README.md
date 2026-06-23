@@ -28,35 +28,39 @@ live by `get-knowledge`, no ingestion/embeddings. The SQLite store holds only *o
 
 ## Install (operator)
 
-Hermes itself is provided by the Hostinger one-click deploy. Then, **once per Hermes deploy**, one command:
+Hermes is provided by the Hostinger one-click deploy. Then, **once per Hermes deploy**, clone onto the
+persistent volume and run the installer:
 
 ```bash
 git clone <this-repo> ace && cd ace && ./install.sh
 ```
 
-`./install.sh` registers this repo's `skills/` directory with Hermes as an **`external_dirs`** source
-(in `~/.hermes/config.yaml`) and installs the script-only deps from `requirements-skills.txt`. Hermes
-then discovers all skills **in place** — there's no per-skill copy, `skills/_lib` stays a sibling for
-the scripts to import (Hermes ignores it as a skill since it starts with `_`), and **updates are just
-`git pull`**. Keep the clone where it is — Hermes loads the skills from there.
+`./install.sh` (one time) installs the script-only deps, registers this repo's `skills/` directory with
+Hermes as an **`external_dirs`** source, and puts an **`ace`** command on your PATH (a symlink, like
+Homebrew). Hermes discovers all skills **in place** — no per-skill copy, `skills/_lib` stays a sibling
+for the scripts to import (Hermes ignores it as a skill since it starts with `_`), and **updates are
+just `ace update`** (a `git pull`). Keep the clone where it is — Hermes loads the skills from there.
 
-Use `./install.sh --dry-run` to preview, `--no-deps` to skip the pip step, `--orchestrator <name>` to
-target another orchestrator (when one's added).
-
-> Why not `hermes skills install`? That command installs **one** skill at a time (from a tap/URL) and
-> *copies* it into `~/.hermes/skills/` — it can't take a whole multi-skill repo, and it would strand
-> our shared `skills/_lib`. `external_dirs` is Hermes' mechanism for loading your own skills directory.
+> Why not `hermes skills install`? That installs **one** skill at a time and *copies* it into
+> `~/.hermes/skills/` — it can't take a whole multi-skill repo, and it would strand our shared
+> `skills/_lib`. `external_dirs` is Hermes' mechanism for loading your own skills directory.
+>
+> Note: a Hermes **profile is its own home and does not inherit the root config**, so each brand
+> profile needs the skills registered in *its own* `config.yaml`. `ace brand create` does that.
 
 ## Set up a brand (operator)
 
-A skill runs *inside* a profile, so the profile must exist first:
+From anywhere, one command creates the brand's profile and registers Ace's skills into it:
 
 ```bash
-# 3. create the brand's Hermes profile (attaches Discord bot token, Slack token, OpenRouter key/model)
-hermes --profile <brand> setup        # exact command confirmed in Phase 0 spike
+ace brand create "<brand>"     # = hermes profile create + register skills in the profile's config
+```
 
-# 4. configure Ace inside that profile (channel scoping, Growi, crons, SOUL.md) + drop in knowledge.yaml
-/ace setup-brand
+Then attach the brand's credentials and configure Ace inside that profile:
+
+```bash
+<brand> setup                  # Hermes: attach Discord/Slack tokens + OpenRouter key/model
+<brand> chat                   # then run:  /setup-brand   (channel scoping, crons, SOUL.md)
 ```
 
 The brand team never touches Hermes — they keep the brand's **`knowledge.yaml`** current (brief, FAQ,

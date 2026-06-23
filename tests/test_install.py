@@ -13,6 +13,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "install.sh"
+ACE_CLI = REPO / "bin" / "ace"
 SKILLS_DIR = REPO / "skills"
 BASH = shutil.which("bash")
 
@@ -132,6 +133,66 @@ def test_profile_missing_errors_without_create(tmp_path):
     )
     assert r.returncode != 0
     assert "not found" in out(r).lower()
+
+
+def test_profile_create_dry_run_uses_singular_profile_command(tmp_path):
+    r = run(
+        ["--profile", "demo", "--create", "--dry-run", "--repo", str(REPO)],
+        extra_env={"HERMES_HOME": str(tmp_path)},
+    )
+    assert r.returncode == 0, out(r)
+    assert "hermes profile create demo" in out(r)   # singular, not "profiles"
+    assert "external_dirs" in out(r)
+
+
+def test_global_install_links_ace_cli(tmp_path):
+    bindir = tmp_path / "bin"
+    cfg = tmp_path / "config.yaml"
+    r = run(
+        ["--no-deps", "--repo", str(REPO), "--hermes-config", str(cfg)],
+        extra_env={"ACE_BIN_DIR": str(bindir), "ACE_PYTHON": ACE_PYTHON, "PATH": str(Path(BASH).parent)},
+    )
+    assert r.returncode == 0, out(r)
+    link = bindir / "ace"
+    assert link.is_symlink()
+    assert link.resolve() == ACE_CLI.resolve()
+
+
+# ── ace CLI dispatch ─────────────────────────────────────────────────────────────
+
+def run_ace(args, extra_env=None):
+    env = {"HOME": str(REPO), "PATH": str(Path(BASH).parent)}
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run([BASH, str(ACE_CLI), *args], capture_output=True, text=True, env=env)
+
+
+def test_ace_help():
+    r = run_ace(["help"])
+    assert r.returncode == 0
+    assert "ace brand create" in out(r)
+
+
+def test_ace_brand_create_requires_name():
+    r = run_ace(["brand", "create"])
+    assert r.returncode != 0
+    assert "usage: ace brand create" in out(r).lower()
+
+
+def test_ace_brand_create_dispatches_to_installer(tmp_path):
+    r = run_ace(
+        ["brand", "create", "demo", "--dry-run"],
+        extra_env={"HERMES_HOME": str(tmp_path)},
+    )
+    assert r.returncode == 0, out(r)
+    assert "hermes profile create demo" in out(r)
+    assert "external_dirs" in out(r)
+
+
+def test_ace_unknown_command_errors():
+    r = run_ace(["frobnicate"])
+    assert r.returncode != 0
+    assert "unknown command" in out(r).lower()
 
 
 def test_preserves_existing_config(tmp_path):

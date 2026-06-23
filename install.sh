@@ -81,6 +81,24 @@ run() {  # run a command, or just print it under --dry-run
   if [[ "$DRY_RUN" == "1" ]]; then printf '  $ %s\n' "$*"; else log "$*"; "$@"; fi
 }
 
+# Put the `ace` command on PATH (symlink, Homebrew-style) so it works from anywhere.
+install_cli_wrapper() {
+  local bindir="${ACE_BIN_DIR:-$HOME/.local/bin}"
+  local src="$REPO_ROOT/bin/ace"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    printf '  + link %s -> %s/ace\n' "$src" "$bindir"
+    return 0
+  fi
+  mkdir -p "$bindir"
+  chmod +x "$src" 2>/dev/null || true
+  ln -sf "$src" "$bindir/ace"
+  log "ace command installed: $bindir/ace -> $src"
+  case ":$PATH:" in
+    *":$bindir:"*) : ;;
+    *) warn "add $bindir to PATH to use 'ace' anywhere:  export PATH=\"$bindir:\$PATH\"" ;;
+  esac
+}
+
 # install the script-only Python deps, if the orchestrator didn't already
 install_script_deps() {
   [[ "$NO_DEPS" == "1" ]] && { log "skipping deps (--no-deps)"; return 0; }
@@ -135,10 +153,10 @@ install_hermes() {
     local pdir="$HERMES_HOME/profiles/$PROFILE"
     if [[ ! -d "$pdir" ]]; then
       if [[ "$CREATE_PROFILE" == "1" ]]; then
-        have hermes || die "hermes CLI not on PATH — can't --create the profile '$PROFILE'."
-        run hermes profiles create "$PROFILE"
+        [[ "$DRY_RUN" == "1" ]] || have hermes || die "hermes CLI not on PATH — can't --create the profile '$PROFILE'."
+        run hermes profile create "$PROFILE"
       else
-        die "profile '$PROFILE' not found at $pdir — create it (hermes profiles create $PROFILE) or pass --create."
+        die "profile '$PROFILE' not found at $pdir — create it (hermes profile create $PROFILE) or pass --create."
       fi
     fi
     [[ "$HERMES_CONFIG_SET" == "1" ]] || HERMES_CONFIG="$pdir/config.yaml"
@@ -155,14 +173,14 @@ install_hermes() {
 "Verify with:  $PROFILE skills list" \
 "Then:  run  /setup-brand  in that profile and drop its knowledge.yaml into <profile>/ace/." >&2
   else
+    install_cli_wrapper   # one-time: put `ace` on PATH
     printf '%s\n' \
 "" \
-"Ace skills registered with Hermes (external_dirs → $REPO_ROOT/skills)." \
-"Keep this clone in place — Hermes loads the skills from here; update with: git pull" \
+"Ace installed. Skills registered (external_dirs → $REPO_ROOT/skills); keep this clone in place." \
+"Update anytime with:  ace update   (git pull — skills update live)" \
 "" \
-"Next, per brand:" \
-"  ./install.sh --profile <brand> --create     # one command: create + register skills" \
-"  then run  /setup-brand  in that profile and drop in its knowledge.yaml." >&2
+"Add a brand (from anywhere):" \
+"  ace brand create <name>     # creates the profile + registers Ace's skills" >&2
   fi
 }
 

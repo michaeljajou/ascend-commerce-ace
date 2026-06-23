@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── ace — manage the Ace skill bundle on Hermes ────────────────────────────────
+# Installed on PATH by ./install.sh (symlink), so `ace` works from anywhere.
+# Thin front-end over install.sh + the Hermes CLI.
+# ───────────────────────────────────────────────────────────────────────────────
+
+# Resolve this script's real path through any symlink → repo root.
+SELF="${BASH_SOURCE[0]}"
+while [[ -L "$SELF" ]]; do
+  link="$(readlink "$SELF")"
+  case "$link" in /*) SELF="$link" ;; *) SELF="${SELF%/*}/$link" ;; esac
+done
+ACE_REPO="$(cd "${SELF%/*}/.." && pwd)"
+INSTALL="$ACE_REPO/install.sh"
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+
+usage() {
+  printf '%s\n' \
+"ace — manage the Ace skill bundle on Hermes" \
+"" \
+"Usage:" \
+"  ace install [--dry-run]        Install/refresh the bundle (deps + register skills in the root home)" \
+"  ace brand create <name>        Create a brand profile and register Ace's skills in it" \
+"  ace brand list                 List brand profiles" \
+"  ace update                     git pull the bundle (external skills update live)" \
+"  ace help                       Show this help" \
+"" \
+"Bundle: $ACE_REPO" >&2
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  install)
+    exec "$INSTALL" "$@" ;;
+
+  update)
+    git -C "$ACE_REPO" pull --ff-only "$@"
+    exec "$INSTALL" --no-deps ;;   # re-register (idempotent) in case paths/skills changed
+
+  brand)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      create|add|new)
+        [[ -n "${1:-}" ]] || { printf 'usage: ace brand create <name>\n' >&2; exit 2; }
+        name="$1"; shift
+        exec "$INSTALL" --profile "$name" --create "$@" ;;
+      list|ls)
+        if [[ -d "$HERMES_HOME/profiles" ]]; then ls -1 "$HERMES_HOME/profiles"; else
+          printf 'no profiles yet (HERMES_HOME=%s)\n' "$HERMES_HOME" >&2; fi ;;
+      ""|-h|--help|help)
+        printf 'usage: ace brand <create|list> ...\n' >&2 ;;
+      *)
+        printf 'unknown: ace brand %s (try: create, list)\n' "$sub" >&2; exit 2 ;;
+    esac
+    ;;
+
+  help|-h|--help) usage ;;
+  *) printf 'unknown command: %s\n\n' "$cmd" >&2; usage; exit 2 ;;
+esac
