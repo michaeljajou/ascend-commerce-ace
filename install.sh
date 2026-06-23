@@ -14,6 +14,12 @@ set -euo pipefail
 # source in Hermes' config. Hermes then discovers all skills in place (and
 # ignores skills/_lib, since it starts with "_"), our scripts import _lib as a
 # sibling, and updates are just `git pull`. The clone IS the install — keep it.
+#
+# A Hermes PROFILE is its own HERMES_HOME and does NOT inherit the root config,
+# so each brand profile needs the skills registered in ITS OWN config.yaml:
+#   ./install.sh                      # register in the root home (admin/testing)
+#   ./install.sh --profile <brand>    # register in that profile (one command per brand)
+#   ./install.sh --profile <brand> --create   # create the profile first, then register
 # ───────────────────────────────────────────────────────────────────────────────
 
 SUPPORTED_ORCHESTRATORS=("hermes")
@@ -28,6 +34,9 @@ REPO_ROOT="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
 ORCHESTRATOR="${ACE_ORCHESTRATOR:-$DEFAULT_ORCHESTRATOR}"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 HERMES_CONFIG="${HERMES_CONFIG:-$HERMES_HOME/config.yaml}"
+PROFILE=""
+CREATE_PROFILE=0
+HERMES_CONFIG_SET=0
 DRY_RUN=0
 NO_DEPS=0
 
@@ -35,12 +44,14 @@ usage() {
   printf '%s\n' \
 "Install the Ace skill bundle into an orchestrator." \
 "" \
-"Usage: ./install.sh [--orchestrator <name>] [--repo <path>] [--dry-run] [--no-deps]" \
+"Usage: ./install.sh [--profile <name> [--create]] [--orchestrator <name>] [--dry-run]" \
 "" \
 "Options:" \
+"  --profile <name>       Register the skills in this Hermes PROFILE's own config (one cmd per brand)" \
+"  --create               With --profile: create the profile first if it doesn't exist" \
 "  --orchestrator <name>  Target orchestrator (default: ${DEFAULT_ORCHESTRATOR}). Supported: ${SUPPORTED_ORCHESTRATORS[*]}" \
 "  --repo <path>          Bundle root to install (default: this repo)" \
-"  --hermes-config <path> Hermes config.yaml to update (default: \$HERMES_HOME/config.yaml)" \
+"  --hermes-config <path> Explicit config.yaml to update (default: \$HERMES_HOME/config.yaml, or the profile's)" \
 "  --no-deps              Skip installing the script-only Python deps" \
 "  --dry-run              Print what it would do without changing anything" \
 "  -h, --help             Show this help" >&2
@@ -48,12 +59,15 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --profile)         PROFILE="${2:-}"; shift 2 ;;
+    --profile=*)       PROFILE="${1#*=}"; shift ;;
+    --create)          CREATE_PROFILE=1; shift ;;
     --orchestrator)    ORCHESTRATOR="${2:-}"; shift 2 ;;
     --orchestrator=*)  ORCHESTRATOR="${1#*=}"; shift ;;
     --repo)            REPO_ROOT="${2:-}"; shift 2 ;;
     --repo=*)          REPO_ROOT="${1#*=}"; shift ;;
-    --hermes-config)   HERMES_CONFIG="${2:-}"; shift 2 ;;
-    --hermes-config=*) HERMES_CONFIG="${1#*=}"; shift ;;
+    --hermes-config)   HERMES_CONFIG="${2:-}"; HERMES_CONFIG_SET=1; shift 2 ;;
+    --hermes-config=*) HERMES_CONFIG="${1#*=}"; HERMES_CONFIG_SET=1; shift ;;
     --no-deps)         NO_DEPS=1; shift ;;
     --dry-run)         DRY_RUN=1; shift ;;
     -h|--help)         usage; exit 0 ;;
@@ -115,16 +129,41 @@ PY
 }
 
 install_hermes() {
+  # Per-profile install: a profile is its own HERMES_HOME and does NOT inherit the root
+  # config, so register the skills in the profile's OWN config.yaml.
+  if [[ -n "$PROFILE" ]]; then
+    local pdir="$HERMES_HOME/profiles/$PROFILE"
+    if [[ ! -d "$pdir" ]]; then
+      if [[ "$CREATE_PROFILE" == "1" ]]; then
+        have hermes || die "hermes CLI not on PATH — can't --create the profile '$PROFILE'."
+        run hermes profiles create "$PROFILE"
+      else
+        die "profile '$PROFILE' not found at $pdir — create it (hermes profiles create $PROFILE) or pass --create."
+      fi
+    fi
+    [[ "$HERMES_CONFIG_SET" == "1" ]] || HERMES_CONFIG="$pdir/config.yaml"
+    NO_DEPS=1   # deps are global (installed once by the plain ./install.sh); profile install only wires skills
+  fi
+
   install_script_deps
   register_external_dir "$REPO_ROOT/skills"
-  printf '%s\n' \
+
+  if [[ -n "$PROFILE" ]]; then
+    printf '%s\n' \
+"" \
+"Ace skills registered for profile '$PROFILE' (in $HERMES_CONFIG)." \
+"Verify with:  $PROFILE skills list" \
+"Then:  run  /setup-brand  in that profile and drop its knowledge.yaml into <profile>/ace/." >&2
+  else
+    printf '%s\n' \
 "" \
 "Ace skills registered with Hermes (external_dirs → $REPO_ROOT/skills)." \
 "Keep this clone in place — Hermes loads the skills from here; update with: git pull" \
 "" \
 "Next, per brand:" \
-"  1. Create the brand's Hermes profile (attaches Discord/Slack tokens + OpenRouter key/model)." \
-"  2. Run  /ace setup-brand  inside that profile, and drop in its knowledge.yaml." >&2
+"  ./install.sh --profile <brand> --create     # one command: create + register skills" \
+"  then run  /setup-brand  in that profile and drop in its knowledge.yaml." >&2
+  fi
 }
 
 # ── main ───────────────────────────────────────────────────────────────────────

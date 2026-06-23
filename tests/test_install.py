@@ -108,6 +108,32 @@ def test_registration_is_idempotent(tmp_path):
     assert cfg.read_text().count(str(SKILLS_DIR)) == 1  # no duplicate
 
 
+def test_profile_targets_profile_config(tmp_path):
+    # HERMES_HOME=tmp; a profile dir exists → --profile writes to <home>/profiles/<name>/config.yaml
+    home = tmp_path
+    pdir = home / "profiles" / "acme"
+    pdir.mkdir(parents=True)
+    r = run(
+        ["--profile", "acme", "--repo", str(REPO)],
+        extra_env={"HERMES_HOME": str(home), "ACE_PYTHON": ACE_PYTHON},
+    )
+    assert r.returncode == 0, out(r)
+    cfg = pdir / "config.yaml"
+    assert cfg.exists()
+    import yaml
+
+    assert yaml.safe_load(cfg.read_text())["skills"]["external_dirs"] == [str(SKILLS_DIR)]
+
+
+def test_profile_missing_errors_without_create(tmp_path):
+    r = run(
+        ["--profile", "ghost", "--dry-run", "--repo", str(REPO)],
+        extra_env={"HERMES_HOME": str(tmp_path)},
+    )
+    assert r.returncode != 0
+    assert "not found" in out(r).lower()
+
+
 def test_preserves_existing_config(tmp_path):
     cfg = tmp_path / "config.yaml"
     cfg.write_text("model: openrouter/anthropic/claude-sonnet-4-6\nskills:\n  external_dirs:\n    - /other/skills\n")
