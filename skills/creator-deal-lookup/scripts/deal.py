@@ -2,7 +2,7 @@
 """Grounding tool: look up a creator's paid-collab / ambassador deal from the profile store.
 
 Used in paid-collab (1:1) and ambassador channels to answer logistics about a specific deal
-(terms, rate, schedule, deliverables, payment). Like `kb-search`, a *miss* is the never-fabricate
+(terms, rate, schedule, deliverables, payment). Like get-knowledge, a *miss* is the never-fabricate
 signal: if no deal is found, escalate — never invent terms.
 
 Prints JSON:

@@ -1,26 +1,24 @@
-"""Embedded per-profile store for Ace (stdlib only).
+"""Embedded per-profile store for Ace's *operational* data (stdlib only).
 
-One SQLite database per Hermes profile holds a brand's ingested knowledge (documents + chunks
-with embeddings) **and** its structured data (creators, deals, interactions, feedback,
-moderation). Vector search is brute-force cosine in Python — at ~thousands of chunks per brand
-this is fast and keeps the dependency surface to the stdlib. (If a brand's corpus ever grows
-large, swap `search()` for sqlite-vec or Postgres/pgvector — the interface stays the same.)
+One SQLite database per Hermes profile holds the brand's structured runtime data: creators, deals,
+interactions, feedback, and moderation events (+ metrics derived from them).
 
-Resolving the active profile's data dir is a Phase-0 spike item; `db_path()` implements a
-sensible default driven by env vars that the `setup-brand` skill will set per profile.
+Brand *knowledge* (brief/FAQ/commission/etc.) is NOT here — it lives as a structured YAML file the
+agent reads directly (see ``knowledge.py``). This store is for things that change at runtime.
+
+Resolving the active profile's data dir is a Phase-0 spike item; `data_dir()` implements a sensible
+default driven by env vars that `setup-brand` will set per profile.
 """
 
 from __future__ import annotations
 
-import math
 import os
 import sqlite3
 import time
-from array import array
 from pathlib import Path
 
 from . import models
-from .models import Chunk, Creator, Deal, SearchHit
+from .models import Creator, Deal
 
 # --- profile/data-dir resolution -------------------------------------------------------------
 
@@ -28,12 +26,12 @@ DB_FILENAME = "ace.db"
 
 
 def data_dir() -> Path:
-    """Directory for the *active* profile's Ace data.
+    """Directory for the *active* profile's Ace data (DB + knowledge file).
 
     Resolution order (first set wins):
-      1. ``ACE_DATA_DIR``           — explicit override (set by setup-brand per profile)
-      2. ``HERMES_PROFILE_DIR``     — the running Hermes profile home → <home>/ace
-      3. ``./data``                 — local dev / test fallback
+      1. ``ACE_DATA_DIR``        — explicit override (set by setup-brand per profile)
+      2. ``HERMES_PROFILE_DIR``  — the running Hermes profile home → <home>/ace
+      3. ``./data``              — local dev / test fallback
     """
     if env := os.environ.get("ACE_DATA_DIR"):
         return Path(env)
@@ -49,21 +47,6 @@ def db_path() -> Path:
 # --- connection + schema ---------------------------------------------------------------------
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS documents (
-    id          TEXT PRIMARY KEY,         -- stable source id (e.g. Drive file id)
-    title       TEXT NOT NULL,
-    path        TEXT,
-    updated_at  TEXT
-);
-CREATE TABLE IF NOT EXISTS chunks (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id  TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    ord          INTEGER NOT NULL,
-    text         TEXT NOT NULL,
-    embedding    BLOB NOT NULL            -- array('f') packed floats
-);
-CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(document_id);
-
 CREATE TABLE IF NOT EXISTS creators (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     handle           TEXT UNIQUE NOT NULL,
@@ -75,23 +58,23 @@ CREATE TABLE IF NOT EXISTS creators (
     last_active_at   TEXT
 );
 CREATE TABLE IF NOT EXISTS deals (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
     creator_handle TEXT UNIQUE NOT NULL,
-    terms_json    TEXT NOT NULL DEFAULT '{}'
+    terms_json     TEXT NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS interactions (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts            REAL NOT NULL,
-    channel       TEXT,
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             REAL NOT NULL,
+    channel        TEXT,
     creator_handle TEXT,
-    question      TEXT,
-    answer        TEXT,
-    status        TEXT NOT NULL            -- answered | escalated | routed
+    question       TEXT,
+    answer         TEXT,
+    status         TEXT NOT NULL            -- answered | escalated | routed
 );
 CREATE TABLE IF NOT EXISTS feedback (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     interaction_id INTEGER REFERENCES interactions(id) ON DELETE CASCADE,
-    value          TEXT NOT NULL,          -- up | down
+    value          TEXT NOT NULL,           -- up | down
     ts             REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS moderation_events (
@@ -99,7 +82,7 @@ CREATE TABLE IF NOT EXISTS moderation_events (
     ts             REAL NOT NULL,
     creator_handle TEXT,
     channel        TEXT,
-    tier           TEXT,                   -- friendly | formal | final
+    tier           TEXT,                    -- friendly | formal | final
     action         TEXT,
     reason         TEXT
 );
@@ -121,91 +104,7 @@ def connect(path: str | os.PathLike | None = None) -> sqlite3.Connection:
     return conn
 
 
-# --- embedding (de)serialization + similarity ------------------------------------------------
-
-
-def pack_embedding(vec: list[float]) -> bytes:
-    return array("f", vec).tobytes()
-
-
-def unpack_embedding(blob: bytes) -> list[float]:
-    a = array("f")
-    a.frombytes(blob)
-    return list(a)
-
-
-def cosine(a: list[float], b: list[float]) -> float:
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0.0 or nb == 0.0:
-        return 0.0
-    return dot / (na * nb)
-
-
-# --- knowledge: documents + chunks -----------------------------------------------------------
-
-
-def upsert_document(
-    conn: sqlite3.Connection,
-    document_id: str,
-    title: str,
-    path: str | None = None,
-    updated_at: str | None = None,
-) -> None:
-    conn.execute(
-        """INSERT INTO documents (id, title, path, updated_at) VALUES (?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET title=excluded.title, path=excluded.path,
-                                          updated_at=excluded.updated_at""",
-        (document_id, title, path, updated_at),
-    )
-
-
-def replace_chunks(conn: sqlite3.Connection, document_id: str, chunks: list[Chunk]) -> None:
-    """Idempotent: clears prior chunks for the doc and inserts the new set."""
-    conn.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
-    conn.executemany(
-        "INSERT INTO chunks (document_id, ord, text, embedding) VALUES (?, ?, ?, ?)",
-        [(document_id, c.ord, c.text, pack_embedding(c.embedding)) for c in chunks],
-    )
-    conn.commit()
-
-
-def search(
-    conn: sqlite3.Connection,
-    query_embedding: list[float],
-    k: int = 5,
-    min_score: float = 0.25,
-) -> list[SearchHit]:
-    """Top-k chunks by cosine similarity, filtered by ``min_score``.
-
-    Returns ``[]`` when nothing clears the threshold — this empty result is the
-    never-fabricate hook: the answer skill must escalate rather than invent.
-    """
-    rows = conn.execute(
-        """SELECT c.text, c.embedding, c.document_id, c.ord, d.title
-           FROM chunks c JOIN documents d ON d.id = c.document_id"""
-    ).fetchall()
-    scored: list[SearchHit] = []
-    for r in rows:
-        score = cosine(query_embedding, unpack_embedding(r["embedding"]))
-        if score >= min_score:
-            scored.append(
-                SearchHit(
-                    text=r["text"],
-                    score=score,
-                    title=r["title"],
-                    document_id=r["document_id"],
-                    ord=r["ord"],
-                )
-            )
-    scored.sort(key=lambda h: h.score, reverse=True)
-    return scored[:k]
-
-
-# --- creators + deals ------------------------------------------------------------------------
+# --- creators --------------------------------------------------------------------------------
 
 
 def upsert_creator(conn: sqlite3.Connection, creator: Creator) -> None:
@@ -248,9 +147,7 @@ def get_creator(conn: sqlite3.Connection, handle: str) -> Creator | None:
 
 
 def set_onboarding_state(conn: sqlite3.Connection, handle: str, state: str) -> None:
-    conn.execute(
-        "UPDATE creators SET onboarding_state = ? WHERE handle = ?", (state, handle)
-    )
+    conn.execute("UPDATE creators SET onboarding_state = ? WHERE handle = ?", (state, handle))
     conn.commit()
 
 
@@ -269,8 +166,7 @@ def list_inactive_creators(
 ) -> list[Creator]:
     """Creators whose last activity is before ``since_ts`` (or never), in the given states.
 
-    Used by `nudge-inactive`: e.g. no engagement 48h after onboarding → gentle nudge;
-    still inactive at 7 days → flag the team. ``last_active_at`` is stored as a stringified epoch.
+    Used by `nudge-inactive`. ``last_active_at`` is stored as a stringified epoch.
     """
     placeholders = ",".join("?" for _ in onboarding_states)
     rows = conn.execute(
@@ -289,14 +185,7 @@ def list_inactive_creators(
     ]
 
 
-def recent_moderation_count(
-    conn: sqlite3.Connection, handle: str, since_ts: float
-) -> int:
-    """How many moderation events this creator has accrued since ``since_ts`` (drives tiering)."""
-    return conn.execute(
-        "SELECT COUNT(*) n FROM moderation_events WHERE creator_handle = ? AND ts >= ?",
-        (handle, since_ts),
-    ).fetchone()["n"]
+# --- deals -----------------------------------------------------------------------------------
 
 
 def upsert_deal(conn: sqlite3.Connection, deal: Deal) -> None:
@@ -313,9 +202,7 @@ def upsert_deal(conn: sqlite3.Connection, deal: Deal) -> None:
 def get_deal(conn: sqlite3.Connection, creator_handle: str) -> Deal | None:
     import json
 
-    r = conn.execute(
-        "SELECT * FROM deals WHERE creator_handle = ?", (creator_handle,)
-    ).fetchone()
+    r = conn.execute("SELECT * FROM deals WHERE creator_handle = ?", (creator_handle,)).fetchone()
     if not r:
         return None
     return Deal(id=r["id"], creator_handle=r["creator_handle"], terms=json.loads(r["terms_json"]))
@@ -373,6 +260,14 @@ def record_moderation(
     conn.commit()
 
 
+def recent_moderation_count(conn: sqlite3.Connection, handle: str, since_ts: float) -> int:
+    """How many moderation events this creator has accrued since ``since_ts`` (drives tiering)."""
+    return conn.execute(
+        "SELECT COUNT(*) n FROM moderation_events WHERE creator_handle = ? AND ts >= ?",
+        (handle, since_ts),
+    ).fetchone()["n"]
+
+
 def metrics_since(conn: sqlite3.Connection, since_ts: float) -> dict:
     """Aggregate counts for the daily digest / metrics, for interactions at/after ``since_ts``."""
     rows = conn.execute(
@@ -386,8 +281,7 @@ def metrics_since(conn: sqlite3.Connection, since_ts: float) -> dict:
     total = answered + escalated + routed
 
     fb = conn.execute(
-        """SELECT value, COUNT(*) n FROM feedback WHERE ts >= ? GROUP BY value""",
-        (since_ts,),
+        "SELECT value, COUNT(*) n FROM feedback WHERE ts >= ? GROUP BY value", (since_ts,)
     ).fetchall()
     by_fb = {r["value"]: r["n"] for r in fb}
     up, down = by_fb.get("up", 0), by_fb.get("down", 0)

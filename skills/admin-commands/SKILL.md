@@ -1,6 +1,6 @@
 ---
 name: admin-commands
-description: Operator/admin actions — force a KB refresh, view metrics, and trigger ad-hoc announcements. Team-only.
+description: Operator/admin actions — check the brand knowledge file, view metrics, and trigger ad-hoc announcements. Team-only.
 version: 0.1.0
 author: Ascend Commerce
 license: MIT
@@ -17,9 +17,10 @@ Team-facing operations. Restrict to operators (Hermes command access control) �
 When an authorized operator issues an admin action.
 
 ## Actions
-- **`/ace update`** — force a knowledge-base refresh now:
+- **knowledge** — the brand's knowledge is a YAML file in the profile that the team edits directly;
+  it's read live, so there is **no ingest/refresh step**. Smoke-check it loads:
   ```
-  python ${HERMES_SKILL_DIR}/../ingest-knowledge/scripts/ingest.py --source <drive_folder>
+  python ${HERMES_SKILL_DIR}/../get-knowledge/scripts/get.py --section brand
   ```
 - **metrics** — show recent metrics:
   ```
@@ -32,8 +33,8 @@ When an authorized operator issues an admin action.
   profile-level operation.
 
 ## Pitfalls
-- Gate every action to operators; never expose `/ace announce` or `/ace update` to creators.
-- `/ace update` is idempotent; safe to run anytime after the brand team edits Drive.
+- Gate every action to operators; never expose `/ace announce` to creators.
+- No "refresh" is needed — editing the knowledge YAML in the profile takes effect on the next read.
 
 ## Verification
-- `/ace update` reports documents/chunks ingested; metrics returns current counts; `/ace announce` posts to the requested target(s).
+- The knowledge smoke-check returns the brand section; metrics returns current counts; `/ace announce` posts to the requested target(s).

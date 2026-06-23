@@ -18,14 +18,14 @@ This is where the never-fabricate rule is enforced at the point of answering.
 After `classify-question` returns **HANDLE**.
 
 ## Procedure
-1. Call `kb-search`:
+1. Call `get-knowledge`:
    ```
-   python ${HERMES_SKILL_DIR}/../kb-search/scripts/search.py --query "<the question>" --k 5
+   python ${HERMES_SKILL_DIR}/../get-knowledge/scripts/get.py --query "<the question>"
    ```
-2. **If `results` is non-empty:** write a concise, friendly answer in the brand voice using
-   **only** facts present in the returned chunks. Do not add details that aren't there.
-3. **If `results` is empty:** do **not** answer from memory or general knowledge. Acknowledge the
-   question and hand off to `escalate-to-team` (reason `not_grounded`).
+2. **If it returns knowledge (non-empty):** write a concise, friendly answer in the brand voice
+   using **only** facts present in the returned YAML. Do not add details that aren't there.
+3. **If it returns nothing (empty):** do **not** answer from memory or general knowledge. Acknowledge
+   the question and hand off to `escalate-to-team` (reason `not_grounded`).
 4. Log the outcome:
    ```
    python ${HERMES_SKILL_DIR}/../_lib/log_cli.py interaction --status answered \
@@ -34,11 +34,11 @@ After `classify-question` returns **HANDLE**.
    Capture the printed `interaction_id` so `record-feedback` can attach 👍/👎.
 
 ## Pitfalls
-- If the chunks only partially cover the question, answer the covered part and **escalate the rest** —
-  do not fill gaps with assumptions.
-- Never state numbers (rates, dates, timelines) that aren't in the retrieved text.
+- If the knowledge only partially covers the question, answer the covered part and **escalate the
+  rest** — do not fill gaps with assumptions.
+- Never state numbers (rates, dates, timelines) that aren't in the returned knowledge.
 - Keep it short; link the creator to the next step rather than dumping the whole doc.
 
 ## Verification
-- A KB-answerable question yields an answer whose every fact appears in the retrieved chunks.
+- A KB-answerable question yields an answer whose every fact appears in the returned knowledge.
 - An unanswerable question produces an escalation, not a guess.

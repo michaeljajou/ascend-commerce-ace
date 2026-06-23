@@ -24,14 +24,14 @@ brand's POST_ANSWER/POST_ONLY channel.
 ## Procedure
 1. Pull the current campaign/challenge details:
    ```
-   python ${HERMES_SKILL_DIR}/../kb-search/scripts/search.py --query "current active campaign challenge details deadline prizes" --k 5
+   python ${HERMES_SKILL_DIR}/../get-knowledge/scripts/get.py --query "current active campaign challenge details deadline prizes"
    ```
 2. Fill a short reminder template (name, theme, how to participate, deadline, prizes) **using only**
    the retrieved facts.
 3. Post to the configured channel (Hermes cron delivery handles the target).
 
 ## Pitfalls
-- If `kb-search` returns nothing about an active campaign, **don't invent one** — skip the post (or
+- If `get-knowledge` returns nothing about an active campaign, **don't invent one** — skip the post (or
   post a generic "join the community" nudge only if the brand allows).
 - Never state prizes/deadlines not present in the KB.
 

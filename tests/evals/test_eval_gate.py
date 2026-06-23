@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import runner  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
-KNOWLEDGE = REPO / "tests" / "fixtures" / "pilot-brand" / "knowledge"
+KNOWLEDGE = REPO / "tests" / "fixtures" / "pilot-brand" / "knowledge.yaml"
 CASES = Path(__file__).resolve().parent / "fixtures" / "pilot-brand"
 
 

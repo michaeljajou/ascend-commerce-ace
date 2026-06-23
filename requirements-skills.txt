@@ -1,13 +1,10 @@
 # Declared skill-script dependencies.
 #
-# These are the ONLY third-party libraries Ace's skill scripts import at runtime.
 # Install path (Phase 0 spike will confirm which Hermes supports):
 #   - if Hermes auto-installs a skill's declared deps → nothing to do here
 #   - else, once per Hermes container:  uv pip install -r requirements-skills.txt
 #
-# NOTE: the core store/chunking/search runs on the Python stdlib (sqlite3, array, math),
-# so none of these are needed for the unit tests — only for live ingestion / embeddings / Drive.
-httpx>=0.27          # OpenRouter embeddings + Growi/Slack HTTP calls
-jinja2>=3.1          # setup-brand template rendering
-google-api-python-client>=2.0
-google-auth>=2.0
+# Brand knowledge is authored as YAML (PyYAML). httpx is for outbound HTTP (Growi results, and the
+# live eval's OpenRouter calls). Everything else in the bundle is Python stdlib.
+pyyaml>=6.0
+httpx>=0.27

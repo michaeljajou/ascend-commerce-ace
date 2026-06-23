@@ -1,0 +1,29 @@
+# Pilot brand knowledge — the structured doc the agent grounds on (replaces Drive docs).
+brand:
+  name: Pilot Brand
+  voice: Friendly, concise, and encouraging.
+  summary: A skincare brand selling through TikTok Shop creators.
+
+commission:
+  rate: "20%"
+  schedule: "Paid monthly on the 15th"
+  method: "Via the payment method on file"
+
+samples:
+  how_to_request: "Post your shipping address in the #samples channel."
+  shipping_time: "5 to 7 business days"
+  limit: "One sample per active campaign"
+
+compliance:
+  - "Disclose paid partnerships per FTC rules."
+
+faq:
+  - q: "How do I request a sample?"
+    a: "Post your shipping address in #samples; samples ship in 5-7 business days, one per active campaign."
+    tags: [sample, samples, shipping, request]
+  - q: "When is commission paid?"
+    a: "Commission is 20%, paid monthly on the 15th via the method on file."
+    tags: [commission, payment, paid, payout]
+  - q: "How do I get started?"
+    a: "Introduce yourself in #community-chat and join the current campaign or challenge."
+    tags: [getting, started, onboarding, new]

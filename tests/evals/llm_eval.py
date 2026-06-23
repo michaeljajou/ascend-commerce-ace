@@ -17,7 +17,7 @@ fakes and run live via `run.py` against OpenRouter.
 
 from __future__ import annotations
 
-import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,9 +26,15 @@ from model import Model, extract_json  # tests/evals is added to sys.path by cal
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_ROOT = REPO_ROOT / "skills"
 CASES_DIR = Path(__file__).resolve().parent / "cases"
-DEFAULT_KNOWLEDGE = REPO_ROOT / "tests" / "fixtures" / "pilot-brand" / "knowledge"
+DEFAULT_KNOWLEDGE = REPO_ROOT / "tests" / "fixtures" / "pilot-brand" / "knowledge.yaml"
 
 MIN_PASS_RATE = 0.9
+
+# Make the shared _lib importable whether run under pytest (conftest) or via the run.py CLI.
+sys.path.insert(0, str(SKILLS_ROOT))
+from _lib import knowledge  # noqa: E402
+
+import json  # noqa: E402
 
 
 # --- loading ---------------------------------------------------------------------------------
@@ -44,10 +50,9 @@ def load_skill_body(name: str, skills_root: Path = SKILLS_ROOT) -> str:
     return text.strip()
 
 
-def load_kb(knowledge_dir: Path = DEFAULT_KNOWLEDGE) -> str:
-    return "\n\n".join(
-        p.read_text(encoding="utf-8") for p in sorted(knowledge_dir.rglob("*.md"))
-    ).strip()
+def load_kb(knowledge_path: Path = DEFAULT_KNOWLEDGE) -> str:
+    """Render the brand's structured knowledge YAML as text for grounding context."""
+    return knowledge.to_text(knowledge.load_knowledge(knowledge_path))
 
 
 def load_cases(path: Path) -> list[dict]:

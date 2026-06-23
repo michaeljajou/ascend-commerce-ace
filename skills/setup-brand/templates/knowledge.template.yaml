@@ -1,0 +1,133 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Ace brand knowledge — fill this out per brand, save as `knowledge.yaml`
+# ─────────────────────────────────────────────────────────────────────────────
+# This is the single source of truth Ace uses to answer creators. Ace will ONLY
+# state facts that appear in this file — if something isn't here, Ace escalates to
+# the team instead of guessing. So: be accurate, be specific, keep it current.
+#
+# How to use:
+#   • Copy this file, replace every value below with the brand's real info.
+#   • Save it as `knowledge.yaml` and hand it to the team that deploys Ace
+#     (it lives in the brand's profile, not in code). Editing it takes effect
+#     immediately — there's no upload/refresh step.
+#   • Required sections: `brand` and `faq`. Everything else is optional but
+#     recommended — the more you fill in, the more Ace can answer directly.
+#
+# Notes:
+#   • The values below are a MOCK example (a made-up brand) to show the shape.
+#     Replace them entirely.
+#   • Per-creator paid-collab deal terms (rates/deadlines for a specific creator)
+#     do NOT go here — those are private and handled separately. This file is the
+#     general brand knowledge every creator can see.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# REQUIRED — who the brand is and how Ace should sound.
+brand:
+  name: "Glow Labs"                       # brand name as creators know it
+  voice: "Friendly, upbeat, and concise — encouraging but professional."
+  summary: "A clean skincare brand sold through TikTok Shop creators."
+  website: "https://glowlabs.example.com"
+  products:                               # the main products creators promote
+    - "Vitamin C Serum"
+    - "Hydrating Gel Moisturizer"
+    - "SPF 30 Daily Sunscreen"
+  value_props:                            # why the products are worth promoting
+    - "Dermatologist-tested, fragrance-free"
+    - "Cruelty-free and vegan"
+
+# Commission / how creators earn.
+commission:
+  rate: "20% of attributed sales"
+  schedule: "Paid monthly on the 15th for the prior month's sales"
+  method: "PayPal on the creator's profile"
+  notes: "Make sure your PayPal email is verified, or payout rolls to the next cycle."
+
+# Sample requests.
+samples:
+  how_to_request: "Post your full shipping address in the #samples channel."
+  eligibility: "Available to approved creators with a completed profile."
+  shipping_time: "5–7 business days (US domestic)"
+  limit: "One sample per active campaign"
+  notes: "We currently ship samples to US addresses only."
+
+# Active campaigns and challenges creators can join. Add/remove as they change.
+campaigns:
+  - name: "Summer Glow Challenge"
+    type: "challenge"                     # campaign | challenge
+    theme: "Show your morning skincare routine featuring the SPF 30."
+    how_to_participate: "Post a video using #GlowChallenge and tag @glowlabs."
+    deadline: "2026-07-31"
+    prizes: "Top 3 by views win a $500 bonus + a featured repost."
+    hashtag: "#GlowChallenge"
+  # - name: "..."
+  #   type: "campaign"
+  #   ...
+
+# Ambassador / paid-collab PROGRAM info (general only — not individual deal terms).
+ambassadors:
+  overview: "Top-performing creators are invited to the ambassador program."
+  perks: "Higher commission tier, early product access, monthly group calls."
+  how_to_join: "Hit $2k in attributed sales in a month, then the team reaches out."
+
+# Compliance rules creators must follow.
+compliance:
+  - "Disclose paid partnerships clearly (e.g. #ad) per FTC guidelines."
+  - "Don't make medical or 'cure' claims about products."
+  - "Use only brand-approved product names and imagery."
+
+# Post-onboarding orientation — helps new creators get going.
+onboarding:
+  channels:                               # what each key channel is for
+    - channel: "#announcements"
+      purpose: "Official updates — read-only."
+    - channel: "#community-chat"
+      purpose: "Ask questions and meet other creators."
+    - channel: "#samples"
+      purpose: "Request product samples."
+    - channel: "#campaigns"
+      purpose: "Current campaigns and challenges."
+  getting_started:
+    - "Introduce yourself in #community-chat."
+    - "Request a sample in #samples."
+    - "Join the current challenge in #campaigns."
+  how_to_reach_team: "Mention @team in #community-chat, or just ask Ace."
+
+# REQUIRED — the FAQ. This is where Ace gets most of its answers.
+# Each entry: a clear question (q), a factual answer (a), and tags (keywords that
+# help Ace match a creator's wording). Aim for 30–40 covering real questions.
+faq:
+  - q: "How do I request a sample?"
+    a: "Post your shipping address in #samples. Samples ship in 5–7 business days, one per active campaign (US only for now)."
+    tags: [sample, samples, shipping, request, address]
+
+  - q: "When do I get paid?"
+    a: "Commission is 20% of attributed sales, paid monthly on the 15th to the PayPal on your profile."
+    tags: [commission, payment, paid, payout, when, money]
+
+  - q: "What's the commission rate?"
+    a: "20% of attributed sales."
+    tags: [commission, rate, percent, earnings]
+
+  - q: "How do I join the current challenge?"
+    a: "Post a video using #GlowChallenge and tag @glowlabs before July 31, 2026. Top 3 by views win a $500 bonus."
+    tags: [challenge, campaign, join, participate, contest, prize]
+
+  - q: "How do I get started as a new creator?"
+    a: "Introduce yourself in #community-chat, request a sample in #samples, and join the current challenge in #campaigns."
+    tags: [getting, started, new, onboarding, begin]
+
+  - q: "Do you ship samples internationally?"
+    a: "Right now samples ship to US addresses only."
+    tags: [shipping, international, sample, country]
+
+  - q: "How do I become an ambassador?"
+    a: "Hit $2,000 in attributed sales in a month and the team will reach out about the ambassador program."
+    tags: [ambassador, program, tier, join]
+
+  - q: "Do I need to disclose that a post is sponsored?"
+    a: "Yes — clearly disclose paid partnerships (e.g. #ad) per FTC guidelines."
+    tags: [compliance, disclose, ftc, ad, sponsored, rules]
+
+  # - q: "..."
+  #   a: "..."
+  #   tags: [keyword1, keyword2]

@@ -1,43 +1,12 @@
-"""Plain dataclasses for Ace's per-profile data.
+"""Plain dataclasses for Ace's per-profile operational data.
 
-Dataclasses (not pydantic) keep the core dependency-free so the unit tests run on the stdlib.
-These mirror the tables created in ``store.py``.
+Dataclasses (not pydantic) keep the store layer dependency-free. These mirror the tables created in
+``store.py``. Brand knowledge is a YAML document (see ``knowledge.py``), not modeled here.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-
-
-@dataclass
-class Chunk:
-    """A retrievable slice of a brand document."""
-
-    document_id: str
-    ord: int
-    text: str
-    embedding: list[float] = field(default_factory=list)
-    id: int | None = None
-
-
-@dataclass
-class SearchHit:
-    """A `kb_search` result: a chunk plus its similarity score and source title."""
-
-    text: str
-    score: float
-    title: str
-    document_id: str
-    ord: int
-
-    def to_json(self) -> dict:
-        return {
-            "text": self.text,
-            "score": round(self.score, 4),
-            "title": self.title,
-            "document_id": self.document_id,
-            "ord": self.ord,
-        }
 
 
 @dataclass

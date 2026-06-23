@@ -24,7 +24,6 @@ def make_spec(**overrides):
             },
         },
         "slack_channel": "#pilot-ops",
-        "drive_folder": "folder-123",
         "model": "anthropic/claude-sonnet-4-6",
     }
     spec.update(overrides)
@@ -57,7 +56,8 @@ def test_build_config_shape():
     assert cfg["model"]["default"] == "anthropic/claude-sonnet-4-6"
     assert cfg["model"]["classify"]  # default applied
     assert cfg["discord"]["scoping"]["monitor"] == ["success-stories"]
-    assert cfg["drive_folder"] == "folder-123"
+    assert cfg["knowledge_file"] == "knowledge.yaml"
+    assert "drive_folder" not in cfg
 
 
 def test_render_soul_includes_voice_rules_and_channels():
@@ -70,7 +70,8 @@ def test_render_soul_includes_voice_rules_and_channels():
 
 def test_build_cronjobs_targets_post_channel():
     jobs = {j["name"]: j for j in setup.build_cronjobs(make_spec())}
-    assert set(jobs) >= {"ingest-knowledge", "daily-digest", "nudge-inactive", "weekly-reminders"}
+    assert set(jobs) >= {"daily-digest", "nudge-inactive", "weekly-reminders"}
+    assert "ingest-knowledge" not in jobs  # no ingest step with YAML knowledge
     assert jobs["daily-digest"]["deliver"] == "slack"
     assert jobs["weekly-reminders"]["deliver"] == "discord:#announcements"
 
@@ -81,7 +82,7 @@ def test_write_profile_roundtrips_config(tmp_path):
     assert cfg["brand_id"] == "pilot"
     assert Path(written["soul"]).read_text().count("Ace") >= 1
     cron = json.loads(Path(written["cronjobs"]).read_text())
-    assert any(j["skill"] == "ingest-knowledge" for j in cron)
+    assert any(j["skill"] == "daily-digest" for j in cron)
 
 
 def test_no_post_target_skips_weekly_reminders():

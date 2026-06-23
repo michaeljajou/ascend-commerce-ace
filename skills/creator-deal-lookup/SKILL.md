@@ -12,13 +12,13 @@ metadata:
 # Creator Deal Lookup (grounding)
 
 Personalized deal facts for paid-collab and ambassador channels. This is the deal-data equivalent
-of `kb-search`: it grounds answers about *one* creator's terms, and a miss means escalate — never
+of `get-knowledge`: it grounds answers about *one* creator's terms, and a miss means escalate — never
 invent terms, rates, or dates.
 
 ## When to Use
 - In a paid-collab (1:1) channel or the ambassador channel, when a creator asks about their own
   deal: payment status/timing, deliverables due, schedule, deal terms.
-- Pair with `kb-search` for general logistics; use this for creator-specific facts.
+- Pair with `get-knowledge` for general logistics; use this for creator-specific facts.
 
 ## Quick Reference
 ```

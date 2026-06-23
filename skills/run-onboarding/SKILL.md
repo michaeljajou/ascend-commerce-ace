@@ -33,7 +33,7 @@ When a creator joins the server (Hermes member-join event) and in their onboardi
 4. **Post-onboarding guidance** (in the brand voice): overview of key channels and what they're
    for; how to request samples / participate in campaigns; the current active campaigns/challenges
    they can join; how to reach the team or ask Ace; and an encouragement to introduce themselves
-   in the community. Ground campaign specifics with `kb-search`.
+   in the community. Ground campaign specifics with `get-knowledge`.
 
 ## Pitfalls
 - `complete` fails without **both** TikTok and email — keep collecting until you have them.

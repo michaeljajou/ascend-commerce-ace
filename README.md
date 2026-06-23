@@ -17,22 +17,26 @@ gateway, or messaging code here: Hermes provides all of that.
 | Container / runtime | **Hermes** (deployed via Hostinger one-click) |
 | Discord + Slack gateways, agent loop, cron, profiles, models (OpenRouter) | **Hermes** |
 | Behavior (classify, answer, escalate, moderate, announce, onboard…) | **this repo** — `skills/*` |
-| Grounding & data (KB search, creator/deal lookup, ingest, digest) | **this repo** — skill scripts over a per-profile SQLite store |
+| Grounding & data (knowledge lookup, creator/deal lookup, digest) | **this repo** — a per-brand knowledge YAML + a per-profile SQLite store |
 
 Most skills are **instruction-only `SKILL.md`** (the Hermes agent reasons from them). Scripts exist
-only for deterministic / grounding work (`ingest`, `search`, `deal`, `digest`, `setup`).
+only for deterministic / grounding work (`get` knowledge, `deal` lookup, `digest`, `setup`).
+
+Brand knowledge is a single structured **`knowledge.yaml`** the team maintains in the profile — read
+live by `get-knowledge`, no ingestion/embeddings. The SQLite store holds only *operational* data
+(creators, deals, interactions, feedback, moderation).
 
 ## Install (operator)
 
-Hermes itself is provided by the Hostinger one-click deploy. Then, **once per Hermes deploy**:
+Hermes itself is provided by the Hostinger one-click deploy. Then, **once per Hermes deploy**, one command:
 
 ```bash
-# 1. install the skill bundle (Hermes CLI — NOT npx, NOT pip)
-hermes skills install <this-repo>
-
-# 2. only if Hermes does not auto-install declared skill deps:
-uv pip install -r requirements-skills.txt
+git clone <this-repo> ace && cd ace && ./install.sh
 ```
+
+`./install.sh` installs the bundle into the orchestrator (defaults to **Hermes**, the only one
+supported): `hermes skills install <repo>` then the script-only deps from `requirements-skills.txt`.
+Use `./install.sh --dry-run` to preview, `--orchestrator <name>` to target another (when added).
 
 ## Set up a brand (operator)
 
@@ -42,28 +46,29 @@ A skill runs *inside* a profile, so the profile must exist first:
 # 3. create the brand's Hermes profile (attaches Discord bot token, Slack token, OpenRouter key/model)
 hermes --profile <brand> setup        # exact command confirmed in Phase 0 spike
 
-# 4. configure Ace inside that profile (channel scoping, Drive folder, Growi, crons, SOUL.md, first ingest)
+# 4. configure Ace inside that profile (channel scoping, Growi, crons, SOUL.md) + drop in knowledge.yaml
 /ace setup-brand
 ```
 
-The brand team never touches Hermes — they keep their **Google Drive folder** current (brief, FAQ,
-commission/payment, sample process, campaigns, paid-collab deals, compliance, onboarding guidance),
-and a 24h cron (or `/ace update`) re-ingests it into that profile's store.
+The brand team never touches Hermes — they keep the brand's **`knowledge.yaml`** current (brief, FAQ,
+commission/payment, sample process, campaigns, compliance, onboarding guidance) in the profile. It's
+read live by `get-knowledge`; edits take effect on the next read (no ingest/refresh).
 
 ## Develop
 
 ```bash
 uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
-pytest                 # core + eval-engine tests run on the stdlib (no extra installs)
+uv pip install -e ".[dev]"   # installs PyYAML (the one hard dep) + pytest
+pytest
 ```
 
 ## Evals (LLM-judged quality gate)
 
 Two layers:
 
-- **Offline gate** (`tests/evals/test_eval_gate.py`) — retrieval boundary using a deterministic
-  fake embedder. Runs in `pytest` with zero installs, every time.
+- **Offline gate** (`tests/evals/test_eval_gate.py`) — the grounding boundary checked directly
+  against the brand `knowledge.yaml` (no model): answerable questions resolve to knowledge,
+  off-topic/creative ones resolve to nothing. Runs in `pytest` every time.
 - **Live gate** (`tests/evals/`) — runs golden cases through a real model via OpenRouter, using the
   actual `SKILL.md` instruction bodies, with an **LLM judge** for grounding faithfulness. Three
   suites: `grounding` (never-fabricate), `classify` (HANDLE vs ROUTE), `moderation` (category).
@@ -82,7 +87,7 @@ missed scam) and if any suite falls below the pass-rate floor (default 90%). Gol
 
 ```
 skills/            the product — one folder per skill (SKILL.md [+ scripts/] [+ tests/])
-skills/_lib/       shared helpers (store, chunking, embeddings, drive, growi, models)
+skills/_lib/       shared helpers (store, knowledge, moderation, growi, models, log_cli)
 tests/                 cross-cutting only: golden eval gate + mocked end-to-end flows
 ```
 

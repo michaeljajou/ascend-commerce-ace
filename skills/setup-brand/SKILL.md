@@ -1,6 +1,6 @@
 ---
 name: setup-brand
-description: Operator onboarding for a brand — write channel scoping + model config + SOUL.md, activate crons, and run the first KB ingest inside an existing profile.
+description: Operator onboarding for a brand — write channel scoping + model config + SOUL.md, activate crons, and validate the brand knowledge file, inside an existing profile.
 version: 0.1.0
 author: Ascend Commerce
 license: MIT
@@ -20,25 +20,30 @@ Configures Ace for one brand **inside its already-created Hermes profile**. This
 ## When to Use
 - An operator runs `/ace setup-brand` for a new brand, or to re-apply config after editing the spec.
 
-## Brand spec (collected interactively, or from a JSON/Drive config doc)
+## Brand spec (collected interactively, or from a JSON/YAML config)
 - `brand_id`, optional `brand_name`
 - `discord.guild_id`, `discord.channels` → behavior map (POST_ONLY / POST_ANSWER / ANSWER /
   FULL_ACTIVE / MONITOR_ONLY / PAID_COLLAB / AMBASSADOR / INACTIVE)
-- `slack_channel`, `drive_folder`, optional `growi_project`
-- `model` (answer model), optional `classify_model`, `embed_model`, `voice`, `brand_name`
+- `slack_channel`, optional `growi_project`
+- `model` (answer model), optional `classify_model`, `voice`, `brand_name`
+
+## Brand knowledge
+The brand's knowledge is a **`knowledge.yaml`** file the team maintains in the profile's data dir
+(brief, FAQ, commission, samples, compliance, campaigns, …). It's read live by `get-knowledge` —
+there is no ingest/embedding step.
 
 ## Procedure
-1. Gather the spec (ask the operator, or read a config doc from the brand's Drive folder).
+1. Gather the spec (ask the operator, or read a config file).
 2. Write the profile artifacts:
    ```
    python ${HERMES_SKILL_DIR}/scripts/setup.py --spec <spec.json>
    ```
-   This writes `config.yaml` (channel scoping + model), `SOUL.md` (voice + locked rules),
-   `cronjobs.yaml` (recurring jobs targeted at this brand's channels).
+   This writes `config.yaml` (channel scoping + model + knowledge_file pointer), `SOUL.md`
+   (voice + locked rules), `cronjobs.yaml` (recurring jobs targeted at this brand's channels).
 3. Activate the cron jobs (accept blueprint suggestions or register from `cronjobs.yaml`).
-4. Run the **first KB ingest**:
+4. Ensure the brand's **`knowledge.yaml`** is present in the profile data dir, then validate it loads:
    ```
-   python ${HERMES_SKILL_DIR}/../ingest-knowledge/scripts/ingest.py --source <drive_folder>
+   python ${HERMES_SKILL_DIR}/../get-knowledge/scripts/get.py --section brand
    ```
 5. Verify (next section).
 
@@ -46,9 +51,10 @@ Configures Ace for one brand **inside its already-created Hermes profile**. This
 - The profile MUST exist first; this skill configures it, it doesn't create it.
 - `MONITOR_ONLY` channels are read for sentiment but **never** replied to publicly — confirm the
   monitor wiring in the Phase 0 spike.
-- Re-running is safe: config/SOUL/cron are overwritten from the spec; ingest is idempotent.
+- Re-running is safe: config/SOUL/cron are overwritten from the spec.
+- Knowledge is just a YAML file edited in the profile — no refresh/ingest needed; edits apply on next read.
 
 ## Verification
 - `config.yaml` scoping lists match the intended channel map (free_response / ignored / monitor / post_targets).
 - `SOUL.md` contains the brand voice and the never-fabricate + classify rules.
-- First ingest reports `documents > 0`; a `kb-search` for a known FAQ phrase returns a hit.
+- `get-knowledge` returns the `brand` section and a known FAQ phrase; an off-topic query returns empty.

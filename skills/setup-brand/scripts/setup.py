@@ -7,7 +7,8 @@ Pure builders (validated + unit-tested) turn a brand spec into the per-profile a
   - cronjobs.yaml    the recurring jobs with this brand's channel targets    (JSON content)
 
 The profile must already exist (a Hermes-CLI step attaches the bot/Slack tokens). This skill
-does NOT create the profile. After writing config, the skill triggers the first KB ingest.
+does NOT create the profile. Brand knowledge is a YAML file the team maintains in the profile (read
+live by get-knowledge) — there is no ingest/embedding step.
 
 NOTE: config/cron are emitted as JSON (which is valid YAML) so they're round-trippable in tests
 without a YAML dependency. Phase 0 spike confirms whether Hermes prefers files or `hermes config set`.
@@ -44,11 +45,10 @@ _IGNORED = {"INACTIVE", "POST_ONLY"}
 # Behaviors where cron posts content.
 _POST_TARGET = {"POST_ONLY", "POST_ANSWER"}
 
-REQUIRED_KEYS = ("brand_id", "discord", "slack_channel", "drive_folder", "model")
+REQUIRED_KEYS = ("brand_id", "discord", "slack_channel", "model")
 
 DEFAULTS = {
     "classify_model": "anthropic/claude-haiku-4-5",
-    "embed_model": "openai/text-embedding-3-small",
     "voice": "Friendly, concise, and encouraging — hype but professional.",
 }
 
@@ -90,15 +90,14 @@ def build_config(spec: dict) -> dict:
     return {
         "brand_id": d["brand_id"],
         "model": {"provider": "openrouter", "default": d["model"], "classify": d["classify_model"]},
-        "embed_model": d["embed_model"],
         "discord": {
             "guild_id": str(d["discord"]["guild_id"]),
             "channels": d["discord"]["channels"],
             "scoping": channel_scoping(d["discord"]["channels"]),
         },
         "slack_channel": d["slack_channel"],
-        "drive_folder": d["drive_folder"],
         "growi_project": d.get("growi_project"),
+        "knowledge_file": "knowledge.yaml",  # the brand knowledge the team maintains in this profile
     }
 
 
@@ -122,9 +121,7 @@ def build_cronjobs(spec: dict) -> list[dict]:
     scoping = channel_scoping(spec["discord"]["channels"])
     post_target = scoping["post_targets"][0] if scoping["post_targets"] else None
     jobs = [
-        {"name": "ingest-knowledge", "schedule": "0 4 * * *", "skill": "ingest-knowledge", "deliver": None},
-        {"name": "daily-digest", "schedule": "0 9 * * *", "skill": "daily-digest",
-         "deliver": "slack"},
+        {"name": "daily-digest", "schedule": "0 9 * * *", "skill": "daily-digest", "deliver": "slack"},
         {"name": "nudge-inactive", "schedule": "0 10 * * *", "skill": "nudge-inactive", "deliver": None},
     ]
     if post_target:
@@ -164,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
 
     spec = _load_spec(args.spec)
     written = write_profile(spec, args.profile_dir)
-    print(json.dumps({"written": written, "next": "run ingest-knowledge for the first KB load"}))
+    print(json.dumps({"written": written, "next": "ensure knowledge.yaml is present; validate with get-knowledge"}))
     return 0
 
 

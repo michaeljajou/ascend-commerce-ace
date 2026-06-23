@@ -26,7 +26,7 @@ Daily (blueprint). Acts only on creators who completed onboarding.
    ```
    Output: `{"nudge": ["@..."], "flag": ["@..."]}`.
 2. For each `nudge` handle → send a short, friendly DM/mention pointing to something easy to do
-   (introduce themselves, join the current campaign). Ground specifics with `kb-search`.
+   (introduce themselves, join the current campaign). Ground specifics with `get-knowledge`.
 3. For each `flag` handle → post a brief note in the brand Slack channel so the team can reach out.
 
 ## Pitfalls
