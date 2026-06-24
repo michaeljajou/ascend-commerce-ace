@@ -15,6 +15,8 @@ REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "install.sh"
 ACE_CLI = REPO / "bin" / "ace"
 SKILLS_DIR = REPO / "skills"
+SKILLS_ADMIN_DIR = REPO / "skills-admin"
+CREATE_BRAND = REPO / "skills-admin" / "create-brand" / "scripts" / "create-brand.sh"
 BASH = shutil.which("bash")
 
 pytestmark = pytest.mark.skipif(BASH is None, reason="bash not available")
@@ -90,23 +92,27 @@ def test_registers_external_dir_in_fresh_config(tmp_path):
     cfg = tmp_path / "hermes" / "config.yaml"
     r = run(
         ["--no-deps", "--repo", str(REPO), "--hermes-config", str(cfg)],
-        extra_env={"ACE_PYTHON": ACE_PYTHON},
+        extra_env={"ACE_PYTHON": ACE_PYTHON, "ACE_BIN_DIR": str(tmp_path / "bin")},
     )
     assert r.returncode == 0, out(r)
     assert cfg.exists()
     import yaml  # available in the test env
 
     data = yaml.safe_load(cfg.read_text())
-    assert data["skills"]["external_dirs"] == [str(SKILLS_DIR)]
+    # root/global install registers BOTH the brand skills and the admin skills
+    assert data["skills"]["external_dirs"] == [str(SKILLS_DIR), str(SKILLS_ADMIN_DIR)]
 
 
 def test_registration_is_idempotent(tmp_path):
+    import yaml
+
     cfg = tmp_path / "config.yaml"
     args = ["--no-deps", "--repo", str(REPO), "--hermes-config", str(cfg)]
-    env = {"ACE_PYTHON": ACE_PYTHON}
+    env = {"ACE_PYTHON": ACE_PYTHON, "ACE_BIN_DIR": str(tmp_path / "bin")}
     assert run(args, extra_env=env).returncode == 0
     assert run(args, extra_env=env).returncode == 0  # second run
-    assert cfg.read_text().count(str(SKILLS_DIR)) == 1  # no duplicate
+    ext = yaml.safe_load(cfg.read_text())["skills"]["external_dirs"]
+    assert ext == [str(SKILLS_DIR), str(SKILLS_ADMIN_DIR)]  # no duplicates after two runs
 
 
 def test_profile_targets_profile_config(tmp_path):
@@ -124,6 +130,43 @@ def test_profile_targets_profile_config(tmp_path):
     import yaml
 
     assert yaml.safe_load(cfg.read_text())["skills"]["external_dirs"] == [str(SKILLS_DIR)]
+
+
+def test_profile_excludes_admin_skills(tmp_path):
+    # a brand profile must NOT get skills-admin (create-brand stays root-only)
+    import yaml
+
+    pdir = tmp_path / "profiles" / "acme"
+    pdir.mkdir(parents=True)
+    r = run(
+        ["--profile", "acme", "--repo", str(REPO)],
+        extra_env={"HERMES_HOME": str(tmp_path), "ACE_PYTHON": ACE_PYTHON},
+    )
+    assert r.returncode == 0, out(r)
+    ext = yaml.safe_load((pdir / "config.yaml").read_text())["skills"]["external_dirs"]
+    assert ext == [str(SKILLS_DIR)]                 # brand skills only
+    assert str(SKILLS_ADMIN_DIR) not in ext         # never the admin dir
+
+
+def test_create_brand_script_dispatches(tmp_path):
+    r = subprocess.run(
+        [BASH, str(CREATE_BRAND), "demo", "--dry-run"],
+        capture_output=True, text=True,
+        env={"HERMES_HOME": str(tmp_path), "PATH": str(Path(BASH).parent)},
+    )
+    assert r.returncode == 0, out(r)
+    assert "hermes profile create demo" in out(r)
+    assert str(SKILLS_DIR) in out(r)
+    assert str(SKILLS_ADMIN_DIR) not in out(r)      # the new brand profile gets brand skills only
+
+
+def test_create_brand_script_requires_name():
+    r = subprocess.run(
+        [BASH, str(CREATE_BRAND)], capture_output=True, text=True,
+        env={"PATH": str(Path(BASH).parent)},
+    )
+    assert r.returncode != 0
+    assert "usage: create-brand.sh" in out(r).lower()
 
 
 def test_profile_missing_errors_without_create(tmp_path):
@@ -200,7 +243,7 @@ def test_preserves_existing_config(tmp_path):
     cfg.write_text("model: openrouter/anthropic/claude-sonnet-4-6\nskills:\n  external_dirs:\n    - /other/skills\n")
     r = run(
         ["--no-deps", "--repo", str(REPO), "--hermes-config", str(cfg)],
-        extra_env={"ACE_PYTHON": ACE_PYTHON},
+        extra_env={"ACE_PYTHON": ACE_PYTHON, "ACE_BIN_DIR": str(tmp_path / "bin")},
     )
     assert r.returncode == 0, out(r)
     import yaml

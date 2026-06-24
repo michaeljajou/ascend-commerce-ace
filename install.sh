@@ -82,21 +82,27 @@ run() {  # run a command, or just print it under --dry-run
 }
 
 # Put the `ace` command on PATH (symlink, Homebrew-style) so it works from anywhere.
+# Default to /usr/local/bin (root-owned, on PATH). We deliberately do NOT use Hermes'
+# own wrapper dir ($HERMES_HOME/.local/bin) — creating it as root there blocks Hermes
+# (which runs as a non-root user) from writing its per-profile wrappers.
 install_cli_wrapper() {
-  local bindir="${ACE_BIN_DIR:-$HOME/.local/bin}"
+  local bindir="${ACE_BIN_DIR:-/usr/local/bin}"
   local src="$REPO_ROOT/bin/ace"
   if [[ "$DRY_RUN" == "1" ]]; then
     printf '  + link %s -> %s/ace\n' "$src" "$bindir"
     return 0
   fi
-  mkdir -p "$bindir"
   chmod +x "$src" 2>/dev/null || true
-  ln -sf "$src" "$bindir/ace"
-  log "ace command installed: $bindir/ace -> $src"
-  case ":$PATH:" in
-    *":$bindir:"*) : ;;
-    *) warn "add $bindir to PATH to use 'ace' anywhere:  export PATH=\"$bindir:\$PATH\"" ;;
-  esac
+  # Non-fatal: a PATH-symlink hiccup must not abort the (already-done) skill install.
+  if mkdir -p "$bindir" 2>/dev/null && ln -sf "$src" "$bindir/ace" 2>/dev/null; then
+    log "ace command installed: $bindir/ace -> $src"
+    case ":$PATH:" in
+      *":$bindir:"*) : ;;
+      *) warn "add $bindir to PATH to use 'ace' anywhere:  export PATH=\"$bindir:\$PATH\"" ;;
+    esac
+  else
+    warn "couldn't link 'ace' into $bindir (permission?). Run $src directly, or set ACE_BIN_DIR to a writable PATH dir and re-run."
+  fi
 }
 
 # install the script-only Python deps, if the orchestrator didn't already
@@ -113,19 +119,19 @@ install_script_deps() {
 
 # ── per-orchestrator adapters ──────────────────────────────────────────────────
 
-# Idempotently add "$1" to skills.external_dirs in the Hermes config (YAML).
-register_external_dir() {
-  local skills_dir="$1"
+# Idempotently add one or more dirs to skills.external_dirs in the Hermes config (YAML).
+register_external_dirs() {
   if [[ "$DRY_RUN" == "1" ]]; then
-    printf '  + register external skills dir in %s\n' "$HERMES_CONFIG"
-    printf '      skills.external_dirs += %s\n' "$skills_dir"
+    printf '  + register external skills dir(s) in %s\n' "$HERMES_CONFIG"
+    local d; for d in "$@"; do printf '      skills.external_dirs += %s\n' "$d"; done
     return 0
   fi
-  log "Registering external skills dir in $HERMES_CONFIG"
-  ACE_CFG="$HERMES_CONFIG" ACE_SKILLS_DIR="$skills_dir" "${ACE_PYTHON:-python3}" - <<'PY'
+  log "Registering external skills dir(s) in $HERMES_CONFIG"
+  local joined; joined="$(printf '%s\n' "$@")"
+  ACE_CFG="$HERMES_CONFIG" ACE_SKILLS_DIRS="$joined" "${ACE_PYTHON:-python3}" - <<'PY'
 import os, sys, pathlib
 cfg = pathlib.Path(os.environ["ACE_CFG"])
-skills_dir = os.environ["ACE_SKILLS_DIR"]
+dirs = [d for d in os.environ["ACE_SKILLS_DIRS"].splitlines() if d]
 try:
     import yaml
 except ImportError:
@@ -135,14 +141,17 @@ except ImportError:
 data = yaml.safe_load(cfg.read_text()) if cfg.exists() else None
 data = data or {}
 skills = data.setdefault("skills", {})
-dirs = skills.setdefault("external_dirs", [])
-if skills_dir in dirs:
-    print(f"already registered: {skills_dir}")
-else:
-    dirs.append(skills_dir)
+ext = skills.setdefault("external_dirs", [])
+changed = False
+for d in dirs:
+    if d in ext:
+        print(f"already registered: {d}")
+    else:
+        ext.append(d); changed = True
+        print(f"registered: {d}")
+if changed:
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(yaml.safe_dump(data, sort_keys=False))
-    print(f"registered: {skills_dir}")
 PY
 }
 
@@ -164,7 +173,13 @@ install_hermes() {
   fi
 
   install_script_deps
-  register_external_dir "$REPO_ROOT/skills"
+  # Brand profiles get only the per-brand skills/. The root home additionally gets the
+  # operator-only skills-admin/ (e.g. create-brand) — so brand agents never see admin skills.
+  local -a dirs=("$REPO_ROOT/skills")
+  if [[ -z "$PROFILE" && -d "$REPO_ROOT/skills-admin" ]]; then
+    dirs+=("$REPO_ROOT/skills-admin")
+  fi
+  register_external_dirs "${dirs[@]}"
 
   if [[ -n "$PROFILE" ]]; then
     printf '%s\n' \
@@ -179,8 +194,9 @@ install_hermes() {
 "Ace installed. Skills registered (external_dirs → $REPO_ROOT/skills); keep this clone in place." \
 "Update anytime with:  ace update   (git pull — skills update live)" \
 "" \
-"Add a brand (from anywhere):" \
-"  ace brand create <name>     # creates the profile + registers Ace's skills" >&2
+"Add a brand:" \
+"  ace brand create <name>          # from the shell, or" \
+"  tell the root agent: /create-brand <name>   # operator skill (root profile only)" >&2
   fi
 }
 

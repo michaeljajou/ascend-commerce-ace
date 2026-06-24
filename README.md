@@ -56,6 +56,11 @@ From anywhere, one command creates the brand's profile and registers Ace's skill
 ace brand create "<brand>"     # = hermes profile create + register skills in the profile's config
 ```
 
+Or do it from the **root agent** (chat/Discord/Slack) with the operator-only `create-brand` skill:
+`/create-brand <brand>`. That skill lives in `skills-admin/` and is registered **only in the root
+profile** — brand profiles never receive it, so a brand agent can't create profiles. Both paths call
+the same `install.sh` under the hood.
+
 Then attach the brand's credentials and configure Ace inside that profile:
 
 ```bash
@@ -99,9 +104,12 @@ missed scam) and if any suite falls below the pass-rate floor (default 90%). Gol
 ## Layout
 
 ```
-skills/            the product — one folder per skill (SKILL.md [+ scripts/] [+ tests/])
+install.sh         one-time installer; installs the `ace` CLI on PATH (see Install)
+bin/ace            the `ace` command (install / brand create / update)
+skills/            per-brand skills — registered in every profile (SKILL.md [+ scripts/] [+ tests/])
 skills/_lib/       shared helpers (store, knowledge, moderation, growi, models, log_cli)
-tests/                 cross-cutting only: golden eval gate + mocked end-to-end flows
+skills-admin/      operator-only skills (create-brand) — registered in the ROOT profile only
+tests/             cross-cutting only: golden eval gate + installer + mocked end-to-end flows
 ```
 
 See the full plan in `~/.claude/plans/attached-is-a-spec-giggly-penguin.md`.
