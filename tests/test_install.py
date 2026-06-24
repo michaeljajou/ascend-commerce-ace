@@ -160,6 +160,18 @@ def test_create_brand_script_dispatches(tmp_path):
     assert str(SKILLS_ADMIN_DIR) not in out(r)      # the new brand profile gets brand skills only
 
 
+def test_create_brand_script_with_spec_runs_setup(tmp_path):
+    r = subprocess.run(
+        [BASH, str(CREATE_BRAND), "demo", "--spec", "/tmp/demo.json", "--dry-run"],
+        capture_output=True, text=True,
+        env={"HERMES_HOME": str(tmp_path), "PATH": str(Path(BASH).parent)},
+    )
+    assert r.returncode == 0, out(r)
+    assert "hermes profile create demo" in out(r)          # profile created
+    assert "setup.py" in out(r) and "--spec /tmp/demo.json" in out(r)  # config written from spec
+    assert str(tmp_path / "profiles" / "demo") in out(r)   # into the right profile dir
+
+
 def test_create_brand_script_requires_name():
     r = subprocess.run(
         [BASH, str(CREATE_BRAND)], capture_output=True, text=True,

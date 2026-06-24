@@ -1,7 +1,7 @@
 ---
 name: create-brand
-description: Operator-only — create a new brand's Hermes profile and register Ace's skills into it. Runs in the ROOT/admin profile only (brand profiles never get this skill). Use when an operator asks to onboard/add/create a new brand.
-version: 0.1.0
+description: Operator-only — create and provision a new brand from the root/admin agent. Gathers the brand's config conversationally (asking for anything missing), then creates the Hermes profile, registers Ace's skills, and writes the brand config. Runs in the ROOT profile only. Use when an operator asks to onboard/add/create a new brand.
+version: 0.2.0
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -9,38 +9,83 @@ metadata:
     requires_tools: [terminal]
 ---
 
-# Create Brand (operator / root profile only)
+# Create Brand (operator console — root profile only)
 
-Provisions a **new brand** from the root/admin agent: creates the brand's Hermes profile and
-registers Ace's per-brand skills into it — the same thing `ace brand create` does from the shell,
-but driven from chat/Discord/Slack by the operator.
+Provision a new brand by **talking to the root agent**: the operator gives whatever details they
+have, you ask for anything missing, then you create + register + configure the brand's profile in one
+step. This is the conversational front end over `create-brand.sh` (which wraps `install.sh` +
+`setup-brand`).
 
-> This skill is installed **only in the root profile** (via `skills-admin/`). Client-facing brand
-> profiles never receive it, so a brand agent can't create profiles or run this admin logic.
+> Installed **only in the root profile** (via `skills-admin/`). Brand profiles never receive this
+> skill, so a brand agent can't create or configure other brands.
 
 ## When to use
-- An operator asks to "create / add / onboard a new brand" (e.g. "create a brand called Glow Labs").
+- An operator says "create / add / onboard a new brand" (with or without full details).
 
-## What it does
-Runs one command, which: `hermes profile create <name>` → registers `external_dirs` (the brand
-skills) in the new profile's `config.yaml`. After this the new profile exists and sees all per-brand
-skills (`setup-brand`, `get-knowledge`, …) — but **not** this admin skill.
+## Two things this does NOT handle (tell the operator)
+- **Secrets** (OpenRouter key, Discord/Slack tokens) — those go through Hermes' secure prompt:
+  `<brand> setup`. Never put secrets in the spec.
+- **Knowledge** (`knowledge.yaml`) — the brand team maintains it as a living file; it's dropped into
+  the brand's data dir (`ACE_DATA_DIR` = `<profile>/ace`) after provisioning, not part of this step.
+
+## Brand config to collect (ask for any that are missing)
+Required:
+- `brand_id` — short lowercase slug, also the profile name (e.g. `glow-labs`).
+- `model` — the answer model (OpenRouter id, e.g. `anthropic/claude-sonnet-4-6`).
+- `slack_channel` — the brand's escalation channel (e.g. `#glow-ops`).
+- `discord.guild_id` and `discord.channels` — a map of channel name → behavior, where behavior is one of:
+  - `POST_ONLY` (announcements: cron posts, no replies)
+  - `POST_ANSWER` (campaigns/challenges: cron posts + answers logistics)
+  - `ANSWER` (e.g. our-products: answers from knowledge)
+  - `FULL_ACTIVE` (community-chat: primary Q&A + sentiment)
+  - `MONITOR_ONLY` (success-stories: read for sentiment, never reply publicly)
+  - `PAID_COLLAB` (private 1:1 collab channels)
+  - `AMBASSADOR` (ambassador group channel)
+  - `INACTIVE` (content-inspo, coaching: ignored)
+
+Optional: `brand_name`, `voice` (brand tone), `classify_model`, `growi_project`.
 
 ## Procedure
-1. Get the brand name from the operator (a short slug, e.g. `glow-labs`).
-2. Run:
+1. Collect the fields above from the operator; **ask follow-up questions for any required field that's
+   missing or ambiguous.** Confirm the channel→behavior map explicitly.
+2. Write the gathered config to a temporary JSON spec, e.g. `/tmp/<brand_id>.json`:
+   ```json
+   {
+     "brand_id": "glow-labs",
+     "brand_name": "Glow Labs",
+     "model": "anthropic/claude-sonnet-4-6",
+     "voice": "Friendly, upbeat, concise.",
+     "slack_channel": "#glow-ops",
+     "discord": {
+       "guild_id": "123456789",
+       "channels": {
+         "announcements": "POST_ONLY",
+         "community-chat": "FULL_ACTIVE",
+         "campaigns": "POST_ANSWER",
+         "success-stories": "MONITOR_ONLY",
+         "our-products": "ANSWER",
+         "content-inspo": "INACTIVE"
+       }
+     }
+   }
    ```
-   ${HERMES_SKILL_DIR}/scripts/create-brand.sh "<name>"
+3. Provision in one command:
    ```
-3. Report the result, then tell the operator the next steps for that brand:
-   - `<name> setup` — attach the brand's Discord/Slack tokens + OpenRouter key/model.
-   - In the brand profile, run `/setup-brand` (channel scoping, crons, SOUL.md) and drop its
-     `knowledge.yaml` into the brand's data dir (`ACE_DATA_DIR`, i.e. `<profile>/ace`).
+   ${HERMES_SKILL_DIR}/scripts/create-brand.sh "<brand_id>" --spec /tmp/<brand_id>.json
+   ```
+   This creates the profile, registers the brand skills, and writes `config.yaml`, `SOUL.md`,
+   `cronjobs.yaml`, and `ACE_DATA_DIR` into the profile.
+4. Report success and the remaining operator steps:
+   - `<brand_id> setup` — attach the OpenRouter key + Discord/Slack tokens (secure).
+   - Drop the brand's `knowledge.yaml` into the data dir (`<profile>/ace`); the brand team keeps it
+     current thereafter.
 
 ## Pitfalls
-- Operator-only by design — do not register this skill into brand profiles.
-- The brand name becomes the profile slug; keep it short, lowercase, no spaces (use a hyphen).
-- Re-running for an existing brand is safe: it skips creation and just re-registers the skills.
+- Operator-only; never register into brand profiles.
+- `brand_id` must be a clean slug (lowercase, hyphens, no spaces) — it's the profile name.
+- Secrets never go in the spec — only via `<brand> setup`.
+- Re-running for an existing brand is safe: it skips creation and re-applies config (idempotent).
 
 ## Verification
-- `<name> skills list` shows the per-brand skills (`setup-brand`, `get-knowledge`) as `local`.
+- `<brand_id> skills list` shows the per-brand skills as `local`.
+- The profile has `config.yaml`, `SOUL.md`, `cronjobs.yaml`, and `.env` with `ACE_DATA_DIR`.

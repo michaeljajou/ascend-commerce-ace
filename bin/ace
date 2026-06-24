@@ -43,9 +43,9 @@ case "$cmd" in
     sub="${1:-}"; shift || true
     case "$sub" in
       create|add|new)
-        [[ -n "${1:-}" ]] || { printf 'usage: ace brand create <name>\n' >&2; exit 2; }
+        [[ -n "${1:-}" ]] || { printf 'usage: ace brand create <name> [--spec <file>]\n' >&2; exit 2; }
         name="$1"; shift
-        exec "$INSTALL" --profile "$name" --create "$@" ;;
+        exec "$ACE_REPO/skills-admin/create-brand/scripts/create-brand.sh" "$name" "$@" ;;
       list|ls)
         if [[ -d "$HERMES_HOME/profiles" ]]; then ls -1 "$HERMES_HOME/profiles"; else
           printf 'no profiles yet (HERMES_HOME=%s)\n' "$HERMES_HOME" >&2; fi ;;
