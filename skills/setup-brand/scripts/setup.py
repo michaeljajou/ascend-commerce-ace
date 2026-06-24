@@ -2,10 +2,12 @@
 """Configure a brand inside its (already-created) Hermes profile.
 
 Pure builders (validated + unit-tested) turn a brand spec into the per-profile artifacts:
-  - config.yaml      Discord channel scoping + model/provider + brand ids   (JSON content; JSON is valid YAML)
-  - SOUL.md          brand voice + the locked behavioral rules
-  - cronjobs.yaml    the recurring jobs with this brand's channel targets    (JSON content)
-  - .env  (merged)   ACE_DATA_DIR=<profile>/ace — the data-dir contract store.py/knowledge.py read
+  - config.yaml  (MERGED)  Ace brand config under the `ace:` key — never clobbers Hermes' own keys
+                           (model, skills.external_dirs, …). Answer model set at top-level `model:`
+                           only when specified; otherwise the brand inherits Hermes' default.
+  - SOUL.md                brand voice + the locked behavioral rules
+  - cronjobs.yaml          the recurring jobs with this brand's channel targets (separate file)
+  - .env  (merged)         ACE_DATA_DIR=<profile>/ace — the data-dir contract store.py/knowledge.py read
 
 This is the Hermes **adapter**: the bundle's core stays orchestrator-agnostic (it reads only
 ``ACE_DATA_DIR``), and this skill is the one place that knows Hermes — it derives the profile's data
@@ -16,9 +18,6 @@ The profile must already exist (a Hermes-CLI step attaches the bot/Slack tokens)
 does NOT create the profile. Brand knowledge is a YAML file the team maintains in the profile (read
 live by get-knowledge) — there is no ingest/embedding step.
 
-NOTE: config/cron are emitted as JSON (which is valid YAML) so they're round-trippable in tests
-without a YAML dependency. Phase 0 spike confirms whether Hermes prefers files or `hermes config set`.
-
 Usage:
     python setup.py --spec brand.json [--profile-dir <dir>]
 """
@@ -27,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -51,12 +51,37 @@ _IGNORED = {"INACTIVE", "POST_ONLY"}
 # Behaviors where cron posts content.
 _POST_TARGET = {"POST_ONLY", "POST_ANSWER"}
 
-REQUIRED_KEYS = ("brand_id", "discord", "slack_channel", "model")
+# model + slack_channel are OPTIONAL: no model → inherit Hermes' default; no slack → default channel.
+REQUIRED_KEYS = ("brand_id", "discord")
 
 DEFAULTS = {
     "classify_model": "anthropic/claude-haiku-4-5",
     "voice": "Friendly, concise, and encouraging — hype but professional.",
 }
+
+
+def _default_slack() -> str | None:
+    """The fallback escalation channel when a brand spec omits one.
+
+    Resolution (first found):
+      1. ``ACE_DEFAULT_SLACK_CHANNEL`` env (handy from the shell)
+      2. the root deployment config: ``$HERMES_HOME/config.yaml`` → ``ace.default_slack_channel``
+         (robust in the agent sandbox, where custom env vars are stripped but HERMES_HOME is passed)
+    """
+    if env := os.environ.get("ACE_DEFAULT_SLACK_CHANNEL"):
+        return env
+    home = os.environ.get("HERMES_HOME")
+    if home:
+        cfg = Path(home) / "config.yaml"
+        if cfg.exists():
+            try:
+                import yaml
+
+                data = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+                return (data.get("ace") or {}).get("default_slack_channel")
+            except Exception:
+                return None
+    return None
 
 
 def validate_spec(spec: dict) -> None:
@@ -92,19 +117,25 @@ def channel_scoping(channels: dict[str, str]) -> dict[str, list[str]]:
 
 
 def build_config(spec: dict) -> dict:
+    """The Ace brand-config block (stored under the `ace:` key). The answer model is NOT here —
+    it's set at Hermes' top-level `model:` only when specified (see _merge_config)."""
     d = {**DEFAULTS, **spec}
-    return {
+    cfg = {
         "brand_id": d["brand_id"],
-        "model": {"provider": "openrouter", "default": d["model"], "classify": d["classify_model"]},
         "discord": {
             "guild_id": str(d["discord"]["guild_id"]),
             "channels": d["discord"]["channels"],
             "scoping": channel_scoping(d["discord"]["channels"]),
         },
-        "slack_channel": d["slack_channel"],
-        "growi_project": d.get("growi_project"),
+        "classify_model": d["classify_model"],
         "knowledge_file": "knowledge.yaml",  # the brand knowledge the team maintains in this profile
     }
+    slack = spec.get("slack_channel") or _default_slack()
+    if slack:
+        cfg["slack_channel"] = slack
+    if d.get("growi_project"):
+        cfg["growi_project"] = d["growi_project"]
+    return cfg
 
 
 def render_soul(spec: dict, template_path: Path | None = None) -> str:
@@ -114,11 +145,12 @@ def render_soul(spec: dict, template_path: Path | None = None) -> str:
     summary = "\n".join(
         f"- #{ch}: {behavior}" for ch, behavior in sorted(d["discord"]["channels"].items())
     )
+    slack = spec.get("slack_channel") or _default_slack() or "the team's Slack channel"
     return tmpl.format(
         brand_name=d.get("brand_name", d["brand_id"]),
         voice=d["voice"],
         channel_summary=summary,
-        slack_channel=d["slack_channel"],
+        slack_channel=slack,
     )
 
 
@@ -157,6 +189,23 @@ def ensure_env(profile_dir: str | Path, updates: dict[str, str]) -> str:
     return str(env_path)
 
 
+def merge_config(config_path: str | Path, spec: dict) -> None:
+    """Merge Ace's brand config into the profile config.yaml WITHOUT clobbering Hermes' own keys
+    (model, skills.external_dirs, …). Ace metadata goes under `ace:`; the answer model is set at
+    Hermes' top-level `model:` only when the spec specifies one (else the brand inherits the default).
+    """
+    import yaml  # PyYAML is a declared dep; needed to preserve existing Hermes config
+
+    path = Path(config_path)
+    existing = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
+    existing = existing or {}
+    existing["ace"] = build_config(spec)
+    if spec.get("model"):
+        existing["model"] = spec["model"]  # Hermes reads top-level model; omit → inherit default
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(existing, sort_keys=False), encoding="utf-8")
+
+
 def write_profile(spec: dict, profile_dir: str | Path) -> dict:
     validate_spec(spec)
     profile = Path(profile_dir)
@@ -164,8 +213,7 @@ def write_profile(spec: dict, profile_dir: str | Path) -> dict:
     config_path = profile / "config.yaml"
     soul_path = profile / "SOUL.md"
     cron_path = profile / "cronjobs.yaml"
-    # JSON content is valid YAML — keeps this dependency-free + round-trippable in tests.
-    config_path.write_text(json.dumps(build_config(spec), indent=2), encoding="utf-8")
+    merge_config(config_path, spec)  # MERGE under `ace:` — preserves Hermes keys + external_dirs
     cron_path.write_text(json.dumps(build_cronjobs(spec), indent=2), encoding="utf-8")
     soul_path.write_text(render_soul(spec), encoding="utf-8")
     # The agnostic seam: point the core at this profile's data dir via ACE_DATA_DIR (merged, not clobbered).

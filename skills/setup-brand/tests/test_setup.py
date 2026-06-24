@@ -52,12 +52,47 @@ def test_channel_scoping_maps_behaviors():
 
 def test_build_config_shape():
     cfg = setup.build_config(make_spec())
-    assert cfg["model"]["provider"] == "openrouter"
-    assert cfg["model"]["default"] == "anthropic/claude-sonnet-4-6"
-    assert cfg["model"]["classify"]  # default applied
+    assert cfg["brand_id"] == "pilot"
     assert cfg["discord"]["scoping"]["monitor"] == ["success-stories"]
     assert cfg["knowledge_file"] == "knowledge.yaml"
+    assert cfg["slack_channel"] == "#pilot-ops"
+    assert cfg["classify_model"]          # default applied
+    assert "model" not in cfg             # answer model lives at Hermes top-level, not in the ace block
     assert "drive_folder" not in cfg
+
+
+def test_model_and_slack_optional(monkeypatch):
+    spec = make_spec()
+    spec.pop("model")
+    spec.pop("slack_channel")
+    monkeypatch.delenv("ACE_DEFAULT_SLACK_CHANNEL", raising=False)
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    cfg = setup.build_config(spec)              # no model, no slack, no env
+    assert "slack_channel" not in cfg          # omitted, not crashed
+    monkeypatch.setenv("ACE_DEFAULT_SLACK_CHANNEL", "#ace-ops")
+    assert setup.build_config(spec)["slack_channel"] == "#ace-ops"   # env default applied
+
+
+def test_merge_config_preserves_hermes_keys(tmp_path):
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("skills:\n  external_dirs:\n    - /repo/skills\n", encoding="utf-8")
+    setup.merge_config(cfg, make_spec())
+    data = yaml.safe_load(cfg.read_text())
+    assert data["skills"]["external_dirs"] == ["/repo/skills"]       # PRESERVED, not clobbered
+    assert data["ace"]["brand_id"] == "pilot"                       # ace config merged in
+    assert data["model"] == "anthropic/claude-sonnet-4-6"           # answer model at top-level (spec had one)
+
+
+def test_merge_config_omits_model_when_unspecified(tmp_path):
+    import yaml
+
+    spec = make_spec()
+    spec.pop("model")
+    cfg = tmp_path / "config.yaml"
+    setup.merge_config(cfg, spec)
+    assert "model" not in yaml.safe_load(cfg.read_text())           # inherits Hermes' default
 
 
 def test_render_soul_includes_voice_rules_and_channels():
@@ -77,9 +112,11 @@ def test_build_cronjobs_targets_post_channel():
 
 
 def test_write_profile_roundtrips_config(tmp_path):
+    import yaml
+
     written = setup.write_profile(make_spec(), tmp_path)
-    cfg = json.loads(Path(written["config"]).read_text())
-    assert cfg["brand_id"] == "pilot"
+    cfg = yaml.safe_load(Path(written["config"]).read_text())
+    assert cfg["ace"]["brand_id"] == "pilot"
     assert Path(written["soul"]).read_text().count("Ace") >= 1
     cron = json.loads(Path(written["cronjobs"]).read_text())
     assert any(j["skill"] == "daily-digest" for j in cron)
