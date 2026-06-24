@@ -85,6 +85,16 @@ def test_merge_config_preserves_hermes_keys(tmp_path):
     assert data["model"] == "anthropic/claude-sonnet-4-6"           # answer model at top-level (spec had one)
 
 
+def test_merge_config_sets_quiet_display_defaults(tmp_path):
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    setup.merge_config(cfg, make_spec())
+    display = yaml.safe_load(cfg.read_text())["display"]
+    assert display["tool_progress"] == "off"            # no tool breadcrumbs in client chat
+    assert display["interim_assistant_messages"] is False  # no mid-turn notes
+
+
 def test_merge_config_omits_model_when_unspecified(tmp_path):
     import yaml
 

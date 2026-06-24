@@ -202,6 +202,11 @@ def merge_config(config_path: str | Path, spec: dict) -> None:
     existing["ace"] = build_config(spec)
     if spec.get("model"):
         existing["model"] = spec["model"]  # Hermes reads top-level model; omit → inherit default
+    # Client-facing brand chat stays quiet: no tool-progress breadcrumbs, no mid-turn assistant notes.
+    # setdefault → a deliberate per-profile override is preserved on re-run.
+    display = existing.setdefault("display", {})
+    display.setdefault("tool_progress", "off")
+    display.setdefault("interim_assistant_messages", False)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(existing, sort_keys=False), encoding="utf-8")
 
