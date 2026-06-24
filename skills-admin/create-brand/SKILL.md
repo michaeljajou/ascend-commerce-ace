@@ -28,11 +28,9 @@ step. This is the conversational front end over `create-brand.sh` (which wraps `
 - **Knowledge** (`knowledge.yaml`) — the brand team maintains it as a living file; it's dropped into
   the brand's data dir (`ACE_DATA_DIR` = `<profile>/ace`) after provisioning, not part of this step.
 
-## Brand config to collect (ask for any that are missing)
-Required:
+## Brand config to collect (ask only for missing REQUIRED fields)
+Required — ask if missing:
 - `brand_id` — short lowercase slug, also the profile name (e.g. `glow-labs`).
-- `model` — the answer model (OpenRouter id, e.g. `anthropic/claude-sonnet-4-6`).
-- `slack_channel` — the brand's escalation channel (e.g. `#glow-ops`).
 - `discord.guild_id` and `discord.channels` — a map of channel name → behavior, where behavior is one of:
   - `POST_ONLY` (announcements: cron posts, no replies)
   - `POST_ANSWER` (campaigns/challenges: cron posts + answers logistics)
@@ -43,11 +41,17 @@ Required:
   - `AMBASSADOR` (ambassador group channel)
   - `INACTIVE` (content-inspo, coaching: ignored)
 
-Optional: `brand_name`, `voice` (brand tone), `classify_model`, `growi_project`.
+Optional — use if given, otherwise **omit from the spec** (a default applies; do NOT ask or invent):
+- `model` — answer model (OpenRouter id, e.g. `anthropic/claude-sonnet-4-6`). Omit → the brand
+  inherits Hermes' default model.
+- `slack_channel` — escalation channel (e.g. `#glow-ops`). Omit → the configured default channel.
+- `brand_name`, `voice` (brand tone), `classify_model`, `growi_project`.
 
 ## Procedure
-1. Collect the fields above from the operator; **ask follow-up questions for any required field that's
-   missing or ambiguous.** Confirm the channel→behavior map explicitly.
+1. Collect the fields above from the operator; **ask follow-up questions only for missing REQUIRED
+   fields** (brand_id, discord guild + channels). **Never ask for or invent optional fields** like
+   `model` or `slack_channel` — if the operator didn't give them, omit them from the spec and the
+   defaults apply. Confirm the channel→behavior map explicitly.
 2. Write the gathered config to a temporary JSON spec, e.g. `/tmp/<brand_id>.json`:
    ```json
    {
