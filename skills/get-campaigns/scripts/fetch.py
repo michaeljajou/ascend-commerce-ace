@@ -67,7 +67,7 @@ def fetch_messages(token: str, channel_id: str, limit: int) -> list[dict]:
     """GET the channel's most recent messages (Discord returns newest first)."""
     req = urllib.request.Request(
         f"{DISCORD_API}/channels/{channel_id}/messages?limit={limit}",
-        headers={"Authorization": f"Bot {token}", "User-Agent": "ace-get-campaigns/0.1"},
+        headers={"Authorization": f"Bot {token}", "User-Agent": "DiscordBot (https://github.com/michaeljajou/ascend-commerce-ace, 0.1)"},
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read().decode("utf-8"))

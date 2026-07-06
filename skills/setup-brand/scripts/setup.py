@@ -293,8 +293,10 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path") ->
 
     # Ascend operates on US Eastern: cron schedules ("0 9 * * *" = 9 AM), log timestamps,
     # and prompt time injection all follow this. IANA zone → DST handled by Hermes.
-    # setdefault → a deliberate per-brand override survives re-runs.
-    existing.setdefault("timezone", "America/New_York")
+    # Hermes seeds `timezone: ""` (= server-local) on profile create, so treat empty as
+    # unset; a deliberate per-brand IANA value survives re-runs.
+    if not existing.get("timezone"):
+        existing["timezone"] = "America/New_York"
 
 
 def merge_config(config_path: str | Path, spec: dict) -> None:

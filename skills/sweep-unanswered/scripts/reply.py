@@ -43,7 +43,7 @@ def post_reply(token: str, channel_id: str, text: str, reply_to: str | None) -> 
         f"{DISCORD_API}/channels/{channel_id}/messages",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Authorization": f"Bot {token}", "Content-Type": "application/json",
-                 "User-Agent": "ace-reply/0.1"},
+                 "User-Agent": "DiscordBot (https://github.com/michaeljajou/ascend-commerce-ace, 0.1)"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
