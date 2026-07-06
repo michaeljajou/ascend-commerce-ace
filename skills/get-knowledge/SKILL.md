@@ -1,7 +1,7 @@
 ---
 name: get-knowledge
 description: Return the brand's knowledge (from its structured YAML file) for grounding. Returns the relevant subset, a named section, or all of it — empty if nothing matches.
-version: 0.1.0
+version: 0.2.0
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -32,6 +32,9 @@ python ${HERMES_SKILL_DIR}/scripts/get.py                                       
 3. If output is **empty**: do **not** answer from memory — hand off to `escalate-to-team`.
 
 ## Pitfalls
+- For what's **currently running** (active campaign/challenge, deadline, prize), use
+  `get-campaigns` instead — it reads the live campaign channels; this file's campaign
+  entries may lag behind launches.
 - Empty output is the **never-fabricate signal**, not an error → escalate.
 - The knowledge doc is small; when in doubt, fetch the whole doc rather than guess a section name.
 - Knowledge is brand-scoped to this profile — you can't see other brands'.

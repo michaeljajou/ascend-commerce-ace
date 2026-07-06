@@ -57,7 +57,18 @@ REQUIRED_KEYS = ("brand_id", "discord")
 DEFAULTS = {
     "classify_model": "anthropic/claude-haiku-4-5",
     "voice": "Friendly, concise, and encouraging — hype but professional.",
+    # Every brand server gets an ops channel for Ace's proactive output (cron results,
+    # notifications). resolve_channels.py resolves this NAME to an ID post-connect and
+    # writes DISCORD_HOME_CHANNEL into the profile .env. Override per brand with
+    # spec discord.home_channel.
+    "home_channel": "agent-ace",
 }
+
+# SOUL.md managed block: resolve_channels.py writes the live channel-name → <#id> map
+# between these markers post-connect; write_profile preserves the block when it
+# regenerates SOUL.md from the template on a setup re-run.
+CHANNEL_DIR_START = "<!-- ace:channel-directory:start -->"
+CHANNEL_DIR_END = "<!-- ace:channel-directory:end -->"
 
 
 def _default_slack() -> str | None:
@@ -126,6 +137,8 @@ def build_config(spec: dict) -> dict:
             "guild_id": str(d["discord"]["guild_id"]),
             "channels": d["discord"]["channels"],
             "scoping": channel_scoping(d["discord"]["channels"]),
+            # Resolved to DISCORD_HOME_CHANNEL(_NAME) in .env by resolve_channels.py.
+            "home_channel": str(d["discord"].get("home_channel") or d["home_channel"]),
         },
         "classify_model": d["classify_model"],
         "knowledge_file": "knowledge.yaml",  # the brand knowledge the team maintains in this profile
@@ -283,6 +296,23 @@ def merge_config(config_path: str | Path, spec: dict) -> None:
     path.write_text(yaml.safe_dump(existing, sort_keys=False), encoding="utf-8")
 
 
+def extract_channel_directory(soul_text: str) -> str | None:
+    """Return the managed channel-directory block (markers included), or None."""
+    start = soul_text.find(CHANNEL_DIR_START)
+    end = soul_text.find(CHANNEL_DIR_END)
+    if start == -1 or end == -1 or end < start:
+        return None
+    return soul_text[start : end + len(CHANNEL_DIR_END)]
+
+
+def upsert_channel_directory(soul_text: str, block: str) -> str:
+    """Insert or replace the managed channel-directory block in a SOUL.md text."""
+    existing = extract_channel_directory(soul_text)
+    if existing:
+        return soul_text.replace(existing, block)
+    return soul_text.rstrip("\n") + "\n\n" + block + "\n"
+
+
 def write_profile(spec: dict, profile_dir: str | Path) -> dict:
     validate_spec(spec)
     profile = Path(profile_dir)
@@ -292,7 +322,14 @@ def write_profile(spec: dict, profile_dir: str | Path) -> dict:
     cron_path = profile / "cronjobs.yaml"
     merge_config(config_path, spec)  # MERGE under `ace:` — preserves Hermes keys + external_dirs
     cron_path.write_text(json.dumps(build_cronjobs(spec), indent=2), encoding="utf-8")
-    soul_path.write_text(render_soul(spec), encoding="utf-8")
+    soul = render_soul(spec)
+    if soul_path.exists():
+        # Keep the post-connect channel directory (name → <#id> map) across re-runs:
+        # it's derived from live Discord state resolve_channels.py owns, not from the spec.
+        block = extract_channel_directory(soul_path.read_text(encoding="utf-8"))
+        if block:
+            soul = upsert_channel_directory(soul, block)
+    soul_path.write_text(soul, encoding="utf-8")
     # The agnostic seam: point the core at this profile's data dir via ACE_DATA_DIR (merged, not clobbered).
     data_dir = (profile / "ace").resolve()
     env_path = ensure_env(profile, {"ACE_DATA_DIR": str(data_dir)})

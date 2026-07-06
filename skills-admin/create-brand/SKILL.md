@@ -82,7 +82,7 @@ Optional — use if given, otherwise **omit from the spec** (a default applies; 
 4. Report success and the remaining operator steps:
    - `<brand_id> setup` — attach the OpenRouter key + Discord/Slack tokens (secure).
    - `<brand_id> chat` -> `/setup-brand` (or re-run `setup.py --spec`) applies channel scoping, SOUL.md, cron jobs, AND the security hardening baseline (approvals=smart, code_execution=strict, command_allowlist, session_reset=idle, terminal tool removed from discord/cli toolsets, tool progress hidden). This is forced on every run — it is not a suggestion the brand team can quietly disable.
-   - First gateway connect, then run `resolve_channels.py` (see setup-brand skill) to populate `discord.free_response_channels` with real channel IDs. Skipping this means the bot requires an @mention everywhere, even in channels meant to be fully active.
+   - First gateway connect, then run `resolve_channels.py` (see setup-brand skill) to populate `discord.free_response_channels` with real channel IDs, set the profile's home channel (default `#agent-ace` — make sure the server has one), and write the clickable channel directory into SOUL.md. Skipping this means the bot requires an @mention everywhere, proactive output has no home, and channel mentions render as plain text.
    - Drop the brand's `knowledge.yaml` into the data dir (`<profile>/ace`); the brand team keeps it
      current thereafter.
 

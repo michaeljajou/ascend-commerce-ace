@@ -1,7 +1,7 @@
 ---
 name: answer-from-kb
 description: Answer a shop-operator (logistics) question using ONLY grounded knowledge-base results. Never fabricate; escalate if not grounded.
-version: 0.1.0
+version: 0.2.0
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -18,7 +18,13 @@ This is where the never-fabricate rule is enforced at the point of answering.
 After `classify-question` returns **HANDLE**.
 
 ## Procedure
-1. Call `get-knowledge`:
+1. **Current campaign/challenge questions** (what's running, deadline, prize, how to join) are
+   grounded by `get-campaigns` instead — the newest post in the brand's campaign channels is the
+   source of truth, not `knowledge.yaml`:
+   ```
+   python ${HERMES_SKILL_DIR}/../get-campaigns/scripts/fetch.py
+   ```
+   Everything else, call `get-knowledge`:
    ```
    python ${HERMES_SKILL_DIR}/../get-knowledge/scripts/get.py --query "<the question>"
    ```

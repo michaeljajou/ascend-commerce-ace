@@ -154,3 +154,39 @@ def test_no_post_target_skips_weekly_reminders():
     spec["discord"]["channels"] = {"community-chat": "FULL_ACTIVE"}  # no POST_* channels
     names = {j["name"] for j in setup.build_cronjobs(spec)}
     assert "weekly-reminders" not in names
+
+
+def test_build_config_home_channel_default_and_override():
+    cfg = setup.build_config(make_spec())
+    assert cfg["discord"]["home_channel"] == "agent-ace"       # bundle default
+    spec = make_spec()
+    spec["discord"]["home_channel"] = "ops-ace"
+    assert setup.build_config(spec)["discord"]["home_channel"] == "ops-ace"
+
+
+def test_render_soul_has_clickable_channel_rule():
+    assert "<#" in setup.render_soul(make_spec())              # the clickable-tag rule survived .format()
+
+
+def test_write_profile_preserves_channel_directory_block(tmp_path):
+    setup.write_profile(make_spec(), tmp_path)
+    soul_path = tmp_path / "SOUL.md"
+    block = "\n".join([
+        setup.CHANNEL_DIR_START,
+        "## Channel directory (auto-generated — do not edit)",
+        "- #general → <#111>",
+        setup.CHANNEL_DIR_END,
+    ])
+    soul_path.write_text(setup.upsert_channel_directory(soul_path.read_text(), block))
+    setup.write_profile(make_spec(), tmp_path)                 # re-run regenerates SOUL.md ...
+    text = soul_path.read_text()
+    assert "- #general → <#111>" in text                       # ... but keeps the live directory
+    assert text.count(setup.CHANNEL_DIR_START) == 1            # exactly once (no duplication)
+
+
+def test_upsert_channel_directory_replaces_in_place():
+    old = "# Soul\n\n" + setup.CHANNEL_DIR_START + "\nold\n" + setup.CHANNEL_DIR_END + "\n"
+    new_block = setup.CHANNEL_DIR_START + "\nnew\n" + setup.CHANNEL_DIR_END
+    out = setup.upsert_channel_directory(old, new_block)
+    assert "old" not in out and "new" in out
+    assert out.count(setup.CHANNEL_DIR_START) == 1
