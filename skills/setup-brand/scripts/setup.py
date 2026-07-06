@@ -156,9 +156,38 @@ def build_config(spec: dict) -> dict:
     # All brands share one escalation channel by default; slack_cli.py brand-tags
     # every post so the team can tell brands apart.
     cfg["slack_channel"] = spec.get("slack_channel") or _default_slack() or "#ace-escalations"
+    cfg["onboarding"] = build_onboarding(spec)
     if d.get("growi_project"):
         cfg["growi_project"] = d["growi_project"]
     return cfg
+
+
+def build_onboarding(spec: dict) -> dict:
+    """The ace.onboarding block (Vaulty replacement). Inert until the operator flips
+    `enabled` — the tick script, thread creation, and timers all gate on it."""
+    d = {**DEFAULTS, **spec}
+    ob = spec.get("onboarding") or {}
+    block = {
+        "enabled": bool(ob.get("enabled", False)),
+        # who can see/manage the private onboarding threads (defaults to the team role)
+        "staff_role": str(ob.get("staff_role") or spec.get("discord", {}).get("team_role")
+                          or d["team_role"]),
+        # Vaulty parity: completion assigns BOTH roles (name match is case-insensitive)
+        "creator_roles": ob.get("creator_roles") or ["onboarded", "creator"],
+        "nudge_hours": ob.get("nudge_hours", 48),
+        "escalate_days": ob.get("escalate_days", 7),
+        "nudge_via": ob.get("nudge_via", "dm"),          # dm | space (their onboarding thread)
+        "max_retries": ob.get("max_retries", 3),
+        "archive_days": ob.get("archive_days", 7),
+        "test_mode": bool(ob.get("test_mode", False)),   # compressed timers for QA
+        "test_nudge_minutes": ob.get("test_nudge_minutes", 3),
+        "test_escalate_minutes": ob.get("test_escalate_minutes", 8),
+    }
+    if ob.get("welcome_message"):
+        block["welcome_message"] = ob["welcome_message"]
+    if ob.get("slack_channel"):
+        block["slack_channel"] = ob["slack_channel"]     # else escalations use ace.slack_channel
+    return block
 
 
 def render_soul(spec: dict, template_path: Path | None = None) -> str:
@@ -192,6 +221,13 @@ def build_cronjobs(spec: dict) -> list[dict]:
          "script": "ace-sweep.py", "deliver": "discord",
          "prompt": "Handle the unanswered creator messages surfaced above, following the "
                    "sweep-unanswered skill exactly. End with only [SILENT]."},
+        # Onboarding (Vaulty replacement): zero-token pre-script handles joins/leavers/
+        # engagement/escalations itself; the agent runs ONLY for 48h nudge composition.
+        # Inert until ace.onboarding.enabled is flipped on.
+        {"name": "onboarding-tick", "schedule": "every 2m", "skill": "run-onboarding",
+         "script": "ace-onboarding-tick.py", "deliver": "discord",
+         "prompt": "Send the onboarding nudges surfaced above, following the run-onboarding "
+                   "skill (Nudge mode) exactly. End with only [SILENT]."},
     ]
     if post_target:
         jobs.append(
@@ -313,7 +349,12 @@ def merge_config(config_path: str | Path, spec: dict) -> None:
     path = Path(config_path)
     existing = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
     existing = existing or {}
+    # The onboarding channel id is live Discord state written post-connect by
+    # resolve_channels.py — keep it across spec-driven regeneration.
+    prior_onboarding_channel = ((existing.get("ace") or {}).get("onboarding") or {}).get("channel_id")
     existing["ace"] = build_config(spec)
+    if prior_onboarding_channel:
+        existing["ace"]["onboarding"]["channel_id"] = prior_onboarding_channel
     if spec.get("model"):
         existing["model"] = spec["model"]  # Hermes reads top-level model; omit → inherit default
     _apply_security_defaults(existing, spec, path.parent)
@@ -338,18 +379,26 @@ def upsert_channel_directory(soul_text: str, block: str) -> str:
     return soul_text.rstrip("\n") + "\n\n" + block + "\n"
 
 
+# Cron pre-scripts installed into <profile>/scripts/ — Hermes only runs cron scripts from
+# there. Copied (not symlinked) so the profile is self-contained; a setup-brand re-run
+# refreshes them, same as the rest of the baseline.
+PROFILE_SCRIPTS = {
+    "ace-sweep.py": "sweep-unanswered/scripts/sweep.py",
+    "ace-onboarding-tick.py": "run-onboarding/scripts/onboarding_tick.py",
+}
+
+
 def install_sweep_script(profile: Path) -> None:
-    """Copy the sweep pre-script into <profile>/scripts/ — Hermes only runs cron scripts
-    from there. Copied (not symlinked) so the profile is self-contained; a setup-brand
-    re-run refreshes it, same as the rest of the baseline."""
-    src = Path(__file__).resolve().parents[2] / "sweep-unanswered" / "scripts" / "sweep.py"
-    if not src.exists():
-        return
+    skills_root = Path(__file__).resolve().parents[2]
     dest_dir = profile / "scripts"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / "ace-sweep.py"
-    dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-    dest.chmod(0o755)
+    for dest_name, rel_src in PROFILE_SCRIPTS.items():
+        src = skills_root / rel_src
+        if not src.exists():
+            continue
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / dest_name
+        dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        dest.chmod(0o755)
 
 
 def write_profile(spec: dict, profile_dir: str | Path) -> dict:

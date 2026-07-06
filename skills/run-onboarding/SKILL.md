@@ -1,7 +1,7 @@
 ---
 name: run-onboarding
-description: Onboard a new creator — collect TikTok handle + email, assign role, and give post-onboarding guidance. Replaces the Vaulty bot.
-version: 0.1.0
+description: Onboard a new creator in their private thread — collect TikTok handle + email with retry limits, assign their role (never fail silently), deliver the guidance sequence, and send 48h nudges. Replaces the Vaulty bot.
+version: 0.2.0
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -11,35 +11,81 @@ metadata:
 
 # Run Onboarding (creator)
 
-Welcomes a new creator, captures their details, assigns their role, and orients them. This is
-creator-facing (distinct from `setup-brand`, which is operator-facing).
+Takes a creator from "just joined" to "actively participating" with zero manual work. The
+zero-token cron tick (`ace-onboarding-tick.py`) detects joins, creates the private thread, and
+posts the welcome + username ask — **you** take over from the creator's first reply.
+
+**Master switch:** if `ace.onboarding.enabled` is false in the profile config, do nothing —
+tell whoever asked that onboarding is currently disabled.
 
 ## When to Use
-When a creator joins the server (Hermes member-join event) and in their onboarding channel/DM.
+- **Conversation mode:** any creator message in their private onboarding thread (this skill is
+  bound to the onboarding channel; threads inherit it).
+- **Nudge mode:** the cron tick woke you with `onboarding_nudges_due`.
 
-## Procedure
-1. Start the record:
+## Conversation mode
+
+Check where they are first: `python ${HERMES_SKILL_DIR}/scripts/onboarding.py status --handle "@<username>"`
+(if there's no record yet, `start` one). Then continue from the first missing piece:
+
+1. **TikTok username.** Valid: a plausible TikTok handle (1–24 chars; letters, digits, `_`, `.`;
+   with or without a leading @; also accept a tiktok.com profile URL and extract the handle).
+   Invalid (blank, "idk", an email, obvious junk) → count it and re-ask with a clarifying prompt:
    ```
-   python ${HERMES_SKILL_DIR}/scripts/onboarding.py start --handle "@creator"
+   python ${HERMES_SKILL_DIR}/scripts/onboarding.py retry --handle "@<username>"
    ```
-2. Collect **TikTok username** and **email**, then save:
+   When `retries` reaches `ace.onboarding.max_retries` (default 3): STOP looping — flag it
+   (`onboarding.py flag`), post to the team Slack via `_lib/slack_cli.py` (who, which field,
+   what they said), and tell the creator warmly that a team member will take it from here.
+   Valid → save: `onboarding.py set --handle "@<username>" --tiktok "<handle>"`
+2. **Email.** Same retry-then-flag logic. Valid = normal email shape.
+   Valid → save: `onboarding.py set --handle "@<username>" --email "<email>"`
+3. **Role assignment** (both fields collected). `assign_role.py` assigns every role in
+   `ace.onboarding.creator_roles` (default: `onboarded` + `creator` — Vaulty parity):
    ```
-   python ${HERMES_SKILL_DIR}/scripts/onboarding.py set --handle "@creator" --tiktok "<tt>" --email "<email>"
+   python ${HERMES_SKILL_DIR}/scripts/assign_role.py --user-id <discord_id>
+   python ${HERMES_SKILL_DIR}/scripts/onboarding.py complete --handle "@<username>" --role creator
    ```
-3. Complete + assign role (Hermes role assignment), then mark active:
+   If `assign_role.py` exits non-zero: **never fail silently** — this blocks their channel
+   access. Tell the creator the team's been looped in to finish their access, AND post the
+   script's error to Slack (`slack_cli.py`) immediately. Do not mark complete.
+4. **Guidance sequence** — one friendly message (or two short ones), in the brand voice, covering
+   in order:
+   1. What the key channels are for (use clickable `<#id>` tags from the SOUL Channel directory;
+      just the few that matter to someone brand new).
+   2. How to request samples / join campaigns — ground in `get-knowledge` (samples section).
+   3. **What's actually running right now** — ground in `get-campaigns` (never boilerplate).
+   4. How to get help: ask Ace in the community channel, or the team for anything creative.
+   5. A nudge to introduce themselves in the community channel.
+   Then stamp it — the 48h clock starts here:
    ```
-   python ${HERMES_SKILL_DIR}/scripts/onboarding.py complete --handle "@creator" --role creator
+   python ${HERMES_SKILL_DIR}/scripts/onboarding.py guided --handle "@<username>"
    ```
-4. **Post-onboarding guidance** (in the brand voice): overview of key channels and what they're
-   for; how to request samples / participate in campaigns; the current active campaigns/challenges
-   they can join; how to reach the team or ask Ace; and an encouragement to introduce themselves
-   in the community. Ground campaign specifics with `get-knowledge`.
+
+## Nudge mode (woken by the tick with `onboarding_nudges_due`)
+
+For each entry: write ONE friendly, low-pressure line in the brand voice pointing at a single
+concrete next step — prefer the live campaign/challenge (`get-campaigns`), else "come say hi"
+in the community channel. No guilt-tripping. Deliver per `nudge_via`:
+- `dm` (default): `python ${HERMES_SKILL_DIR}/scripts/send_dm.py --user-id <discord_id> --text "<nudge>"`
+  — if the DM fails (user blocks server DMs), fall back to posting in their `thread_id` via
+  `${HERMES_SKILL_DIR}/../sweep-unanswered/scripts/reply.py --channel-id <thread_id>`.
+- `space`: post in their `thread_id` directly.
+End your turn with only `[SILENT]`.
 
 ## Pitfalls
-- `complete` fails without **both** TikTok and email — keep collecting until you have them.
-- Don't dump every channel; highlight the few that matter to a brand-new creator.
-- Engagement nudges are handled separately by `nudge-inactive`; don't spam here.
+- The tick already marked them nudged when it woke you — deliver every nudge you were handed;
+  if delivery fails both ways, post the failure to Slack instead of dropping it.
+- `complete` fails without BOTH TikTok and email — that's the guard, not an error to work around.
+- Retries are per-creator and cumulative across both fields — the limit is a total patience
+  budget, not per-field.
+- Never re-run the full flow for someone whose `status` is already `guided`/`active` — answer
+  whatever they asked instead (a duplicate join resumes, never restarts).
+- Escalations (7-day quiet) are the tick's job, not yours — don't nudge anyone twice.
+- Don't dump every channel in guidance; three or four that matter beat eleven.
 
 ## Verification
-- The creator record reaches `onboarding_state = complete` with role + `last_active_at` set.
-- The creator receives channel guidance and a current-campaign pointer grounded in the KB.
+- The creator record walks new → collecting → complete (role set) → guided, with retries counted.
+- Guidance references the actual live campaign and clickable channel tags.
+- A failed role assignment produces a creator-facing note + a Slack alert, never silence.
+- Nudges are one line, one concrete step, delivered by DM with thread fallback.

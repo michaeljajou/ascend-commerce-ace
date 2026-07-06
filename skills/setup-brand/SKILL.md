@@ -61,10 +61,11 @@ there is no ingest/embedding step.
     ```
     python /opt/data/ascend-commerce-ace/skills/setup-brand/scripts/resolve_channels.py --profile-dir <profile_dir>
     ```
-    This wires three things (idempotent, safe to re-run):
+    This wires four things (idempotent, safe to re-run):
     - **Mention-only gateway**: `discord.require_mention: true` with `discord.free_response_channels` cleared. Ace answers @mentions and DMs instantly and hears nothing else live — so team announcements can never draw an accidental reply. Creator messages the team doesn't answer within the grace window are handled by the `sweep-unanswered` cron instead (see step 3).
     - `DISCORD_HOME_CHANNEL` / `DISCORD_HOME_CHANNEL_NAME` in the profile `.env` — Ace's proactive-output channel, resolved from `discord.home_channel` in the spec (**default: `agent-ace`** — every brand server should have an `#agent-ace` ops channel; the script warns if it's missing).
     - The **Channel directory** block in `SOUL.md` — the live `#name → <#id>` map so Ace's channel mentions render as clickable links in Discord.
+    - **Onboarding wiring** (only when `ace.onboarding.enabled` is true): creates the hidden-purpose `#onboarding` parent channel (everyone can view, nobody posts at channel level; staff manage threads), stores `ace.onboarding.channel_id`, makes it the SOLE free-response channel (its private threads inherit it — that's what makes the onboarding conversation work without @mentions), and binds the `run-onboarding` skill to it. Prereqs: **Server Members privileged intent** ON in the Discord dev portal (the join poll needs it), bot has **Manage Roles + Manage Channels/Threads**, its role sits above the creator role, and Vaulty is OFF on that server.
     Restart the gateway once more after this step.
 4. Ensure the brand's **`knowledge.yaml`** is present in the data dir (`<profile>/ace`, = `ACE_DATA_DIR`),
    then validate it loads:

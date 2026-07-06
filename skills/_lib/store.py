@@ -91,6 +91,23 @@ CREATE TABLE IF NOT EXISTS moderation_events (
 """
 
 
+# Columns added after the initial schema shipped (idempotent ALTERs on connect).
+# The onboarding flow (Vaulty replacement) tracks its whole lifecycle on the creator row.
+# NOTE: onboarding_tick.py (copied standalone into each profile's scripts/) carries a
+# mirror of this list — update both together.
+ONBOARDING_MIGRATIONS = [
+    "ALTER TABLE creators ADD COLUMN discord_id TEXT",
+    "ALTER TABLE creators ADD COLUMN thread_id TEXT",          # their private onboarding thread
+    "ALTER TABLE creators ADD COLUMN retries INTEGER DEFAULT 0",
+    "ALTER TABLE creators ADD COLUMN guided_at TEXT",          # guidance done → 48h nudge clock
+    "ALTER TABLE creators ADD COLUMN nudged_at TEXT",
+    "ALTER TABLE creators ADD COLUMN escalated_at TEXT",
+    "ALTER TABLE creators ADD COLUMN escalation_channel TEXT", # Slack channel id of the post
+    "ALTER TABLE creators ADD COLUMN escalation_ts TEXT",      # Slack message ts (✅ resolve poll)
+    "ALTER TABLE creators ADD COLUMN resolved_at TEXT",
+]
+
+
 def connect(path: str | os.PathLike | None = None) -> sqlite3.Connection:
     """Open (creating if needed) the profile DB and ensure the schema exists.
 
@@ -103,6 +120,11 @@ def connect(path: str | os.PathLike | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    for migration in ONBOARDING_MIGRATIONS:
+        try:
+            conn.execute(migration)
+        except sqlite3.OperationalError:
+            pass  # column already exists
     return conn
 
 
@@ -185,6 +207,49 @@ def list_inactive_creators(
         )
         for r in rows
     ]
+
+
+# --- onboarding lifecycle (Vaulty replacement) ------------------------------------------------
+# These work with the migration columns directly (dict rows) rather than the Creator dataclass,
+# which stays focused on the stable core fields.
+
+
+def get_onboarding(conn: sqlite3.Connection, handle: str) -> dict | None:
+    r = conn.execute("SELECT * FROM creators WHERE handle = ?", (handle,)).fetchone()
+    return dict(r) if r else None
+
+
+def update_onboarding(conn: sqlite3.Connection, handle: str, **fields) -> None:
+    """Set arbitrary onboarding columns on a creator row (column names are code-controlled)."""
+    if not fields:
+        return
+    assignments = ", ".join(f"{k} = ?" for k in fields)
+    conn.execute(f"UPDATE creators SET {assignments} WHERE handle = ?", (*fields.values(), handle))
+    conn.commit()
+
+
+def onboarding_stats(conn: sqlite3.Connection) -> dict:
+    """The tracking metrics from the onboarding requirements (per brand)."""
+    rows = conn.execute(
+        "SELECT onboarding_state, COUNT(*) n FROM creators GROUP BY onboarding_state"
+    ).fetchall()
+    by_state = {r["onboarding_state"]: r["n"] for r in rows}
+    nudged_then_active = conn.execute(
+        "SELECT COUNT(*) n FROM creators WHERE onboarding_state = 'active' AND nudged_at IS NOT NULL"
+    ).fetchone()["n"]
+    no_nudge_active = conn.execute(
+        "SELECT COUNT(*) n FROM creators WHERE onboarding_state = 'active' AND nudged_at IS NULL"
+    ).fetchone()["n"]
+    retried = conn.execute(
+        "SELECT COUNT(*) n FROM creators WHERE retries > 0"
+    ).fetchone()["n"]
+    return {
+        "by_state": by_state,
+        "active_without_nudge": no_nudge_active,
+        "active_after_nudge": nudged_then_active,
+        "escalated": by_state.get("escalated", 0) + by_state.get("resolved", 0),
+        "had_invalid_input": retried,
+    }
 
 
 # --- deals -----------------------------------------------------------------------------------

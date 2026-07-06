@@ -102,3 +102,57 @@ def test_setup_rerun_keeps_soul_directory(tmp_path):
 def test_missing_directory_errors(tmp_path):
     (tmp_path / "config.yaml").write_text("ace: {}\n", encoding="utf-8")
     assert resolve_channels.main(["--profile-dir", str(tmp_path)]) == 1
+
+
+def test_onboarding_disabled_creates_nothing(tmp_path):
+    make_profile(tmp_path)
+    resolve_channels.main(["--profile-dir", str(tmp_path)])
+    cfg = yaml.safe_load((tmp_path / "config.yaml").read_text())
+    assert cfg["discord"]["free_response_channels"] == ""
+    assert "channel_skill_bindings" not in cfg["discord"]
+
+
+def test_onboarding_enabled_creates_channel_and_wires_gateway(tmp_path, monkeypatch):
+    make_profile(tmp_path)
+    cfg_path = tmp_path / "config.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["ace"]["onboarding"] = {"enabled": True, "staff_role": "Ascend Team"}
+    cfg["ace"]["discord"]["team_role"] = "Ascend Team"
+    cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    calls = []
+
+    def fake_discord(token, path, payload=None):
+        calls.append((path, payload))
+        if path == "/guilds/g1/roles":
+            return [{"id": "r1", "name": "Ascend Team"}]
+        if path == "/users/@me":
+            return {"id": "botid"}
+        if path == "/guilds/g1/channels":
+            return {"id": "901"}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(resolve_channels, "_discord", fake_discord)
+    assert resolve_channels.main(["--profile-dir", str(tmp_path)]) == 0
+
+    cfg = yaml.safe_load(cfg_path.read_text())
+    assert cfg["ace"]["onboarding"]["channel_id"] == "901"
+    assert cfg["discord"]["free_response_channels"] == "901"      # ONLY the onboarding parent
+    assert cfg["discord"]["channel_skill_bindings"] == [{"id": "901", "skills": ["run-onboarding"]}]
+    create = next(p for path, p in calls if path == "/guilds/g1/channels")
+    everyone = next(o for o in create["permission_overwrites"] if o["id"] == "g1")
+    assert int(everyone["deny"]) & resolve_channels.SEND_MESSAGES  # nobody posts at channel level
+    assert int(everyone["allow"]) & resolve_channels.SEND_MESSAGES_IN_THREADS
+
+
+def test_onboarding_existing_channel_id_not_recreated(tmp_path, monkeypatch):
+    make_profile(tmp_path)
+    cfg_path = tmp_path / "config.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["ace"]["onboarding"] = {"enabled": True, "channel_id": "900"}
+    cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    monkeypatch.setattr(resolve_channels, "_discord",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no REST expected")))
+    resolve_channels.main(["--profile-dir", str(tmp_path)])
+    cfg = yaml.safe_load(cfg_path.read_text())
+    assert cfg["discord"]["free_response_channels"] == "900"      # reused, not recreated

@@ -228,3 +228,42 @@ def test_merge_config_sets_eastern_timezone_default(tmp_path):
     cfg.write_text(yaml.safe_dump({"timezone": "Europe/London"}), encoding="utf-8")
     setup.merge_config(cfg, make_spec())
     assert yaml.safe_load(cfg.read_text())["timezone"] == "Europe/London"   # override survives
+
+
+def test_build_onboarding_defaults_and_master_switch():
+    ob = setup.build_onboarding(make_spec())
+    assert ob["enabled"] is False                            # inert until the operator flips it
+    assert ob["staff_role"] == "Ascend Team"
+    assert ob["creator_roles"] == ["onboarded", "creator"]   # Vaulty parity: both roles
+    assert (ob["nudge_hours"], ob["escalate_days"], ob["max_retries"]) == (48, 7, 3)
+    assert ob["test_mode"] is False
+    spec = make_spec(onboarding={"enabled": True, "nudge_hours": 24, "creator_roles": ["VIP"],
+                                 "welcome_message": "hi {mention}"})
+    ob = setup.build_onboarding(spec)
+    assert ob["enabled"] is True and ob["nudge_hours"] == 24
+    assert ob["creator_roles"] == ["VIP"] and ob["welcome_message"] == "hi {mention}"
+
+
+def test_build_cronjobs_includes_onboarding_tick():
+    jobs = {j["name"]: j for j in setup.build_cronjobs(make_spec())}
+    job = jobs["onboarding-tick"]
+    assert job["script"] == "ace-onboarding-tick.py"         # zero-token pre-script gates the agent
+    assert job["skill"] == "run-onboarding"
+
+
+def test_write_profile_installs_both_tick_scripts(tmp_path):
+    setup.write_profile(make_spec(), tmp_path)
+    assert (tmp_path / "scripts" / "ace-sweep.py").exists()
+    assert (tmp_path / "scripts" / "ace-onboarding-tick.py").exists()
+
+
+def test_merge_config_preserves_onboarding_channel_id(tmp_path):
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    setup.merge_config(cfg, make_spec())
+    data = yaml.safe_load(cfg.read_text())
+    data["ace"]["onboarding"]["channel_id"] = "900"          # written post-connect by resolve_channels
+    cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
+    setup.merge_config(cfg, make_spec())                     # spec-driven re-run
+    assert yaml.safe_load(cfg.read_text())["ace"]["onboarding"]["channel_id"] == "900"
