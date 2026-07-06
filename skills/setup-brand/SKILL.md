@@ -1,7 +1,7 @@
 ---
 name: setup-brand
 description: Operator onboarding for a brand — write channel scoping + model config + SOUL.md, activate crons, and validate the brand knowledge file, inside an existing profile.
-version: 0.1.0
+version: 0.2.0
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -16,6 +16,34 @@ Configures Ace for one brand **inside its already-created Hermes profile**. This
 
 > Prerequisite: the profile already exists and has its Discord bot token, Slack token, and
 > OpenRouter key attached (a thin Hermes-CLI step). This skill does **not** create the profile.
+
+## Discord & Slack checklist — run this for EVERY new brand
+
+Walk it top to bottom with the brand operator; each item has bitten us at least once. Items
+marked *(portal)* live in the Discord **Developer Portal**; *(server)* items live in the brand's
+**Server Settings** — portal toggles do NOT grant server permissions.
+
+1. *(portal)* Bot → Privileged Gateway Intents: **Message Content Intent** ON (required for the
+   bot to read messages at all) and **Server Members Intent** ON (required by the onboarding
+   join poll and role lookups).
+2. *(server)* Invite the bot; then edit the **bot's role**: enable **Manage Roles**,
+   **Manage Channels**, and **Manage Threads** (needed to create #onboarding, open private
+   threads, and assign creator roles).
+3. *(server)* Create the roles: **Ascend Team** (assign to every team member — it gates the
+   reply-sweep, onboarding staff visibility, and never-onboard filtering), plus **onboarded**
+   and **creator** (what completion assigns). Drag both creator roles **below the bot's role**
+   — Discord forbids assigning roles at or above the assigner's own.
+4. *(server)* Create the **#agent-ace** channel (Ace's home for cron output/notifications;
+   resolve_channels wires it automatically).
+5. *(Slack)* Invite the workspace's Hermes bot to **#ace-escalations** (`/invite @<bot>`), and
+   copy `SLACK_BOT_TOKEN` (bot token ONLY — never `SLACK_APP_TOKEN`) into the brand profile's
+   `.env` so escalations/digests can post.
+6. **Before enabling onboarding** (`ace.onboarding.enabled`): turn **Vaulty's join handling
+   OFF** on that server — running both risks duplicate onboarding spaces and role conflicts.
+7. After any of the above changes: re-run step 3b (resolve_channels) + restart the gateway.
+
+Verify items 1–3 without clicking around: `assign_role.py` and the tick scripts print precise
+errors, and a members-list API call failing with `Missing Access` means the intent (1) is off.
 
 ## When to Use
 - An operator runs `/ace setup-brand` for a new brand, or to re-apply config after editing the spec.

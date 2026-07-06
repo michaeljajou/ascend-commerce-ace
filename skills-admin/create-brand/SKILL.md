@@ -80,6 +80,9 @@ Optional — use if given, otherwise **omit from the spec** (a default applies; 
    This creates the profile, registers the brand skills, and writes `config.yaml`, `SOUL.md`,
    `cronjobs.yaml`, and `ACE_DATA_DIR` into the profile.
 4. Report success and the remaining operator steps:
+   - **Walk the "Discord & Slack checklist" at the top of the setup-brand skill** — intents,
+     bot role permissions, the Ascend Team / onboarded / creator roles, #agent-ace, the Slack
+     bot invite, and Vaulty-off. Every item is required; portal toggles alone are not enough.
    - `<brand_id> setup` — attach the OpenRouter key + Discord/Slack tokens (secure).
    - `<brand_id> chat` -> `/setup-brand` (or re-run `setup.py --spec`) applies channel scoping, SOUL.md, cron jobs, AND the security hardening baseline (approvals=smart, code_execution=strict, command_allowlist, session_reset=idle, terminal tool removed from discord/cli toolsets, tool progress hidden). This is forced on every run — it is not a suggestion the brand team can quietly disable.
    - First gateway connect, then run `resolve_channels.py` (see setup-brand skill) to lock the gateway to mention-only, set the profile's home channel (default `#agent-ace` — make sure the server has one), and write the clickable channel directory into SOUL.md. Then register the `sweep-unanswered` cron job (see setup-brand step 3): its zero-token pre-script wakes the agent only for creator messages the team hasn't answered within the grace window. Include `discord.team_role` in the spec so team posts are never swept.
