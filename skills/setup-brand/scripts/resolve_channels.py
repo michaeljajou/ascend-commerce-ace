@@ -7,9 +7,11 @@ only knowable after the brand's gateway has connected to Discord at least once
 and built the profile's channel_directory.json.
 
 What it wires (all idempotent):
-  1. `discord.free_response_channels` in config.yaml — the channels marked
-     free_response in the spec, as numeric IDs (Hermes' gateway gate compares
-     IDs only; without this the bot needs an @mention everywhere).
+  1. Mention-only gateway: `discord.require_mention: true` and
+     `discord.free_response_channels` CLEARED. Ace answers @mentions and DMs
+     instantly and hears nothing else live — team announcements can never get
+     an accidental reply. Unanswered creator messages in the engaged channels
+     are handled by the zero-token sweep cron instead (sweep-unanswered skill).
   2. `DISCORD_HOME_CHANNEL` / `DISCORD_HOME_CHANNEL_NAME` in the profile .env —
      Ace's proactive-output channel (cron results, notifications), resolved
      from `ace.discord.home_channel` (default: agent-ace).
@@ -85,15 +87,16 @@ def main(argv: list[str] | None = None) -> int:
         print("No channels in the directory — is the bot actually in the server yet?", file=sys.stderr)
         return 1
 
-    # 1. free-response channel IDs → config.yaml (gateway hears these without @mention)
-    resolved_ids = [name_to_id[n] for n in sorted(free_response_names) if n in name_to_id]
+    # 1. Mention-only gateway. free_response_channels stays EMPTY on purpose: live
+    # replies happen only on @mention/DM; the engaged channels (scoping.free_response)
+    # are watched by the ace-sweep.py cron script, which wakes the agent only for
+    # creator messages the team hasn't answered within the grace window.
     missing = sorted(free_response_names - name_to_id.keys())
     if missing:
-        print(f"WARNING: could not resolve channel(s) not yet seen by the bot: {missing}", file=sys.stderr)
-    if free_response_names:
-        discord_block = config.setdefault("discord", {})
-        discord_block["require_mention"] = discord_block.get("require_mention", True)
-        discord_block["free_response_channels"] = ",".join(resolved_ids)
+        print(f"WARNING: engaged channel(s) not yet seen by the bot: {missing}", file=sys.stderr)
+    discord_block = config.setdefault("discord", {})
+    discord_block["require_mention"] = True
+    discord_block["free_response_channels"] = ""
 
     # 2. home channel → profile .env (proactive output: cron results, notifications)
     home_name = str(ace_discord.get("home_channel") or DEFAULT_HOME_CHANNEL)
@@ -125,11 +128,12 @@ def main(argv: list[str] | None = None) -> int:
 
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     print(json.dumps({
-        "resolved": {n: name_to_id[n] for n in sorted(free_response_names) if n in name_to_id},
+        "gateway": "mention-only (free_response_channels cleared; sweep cron covers the rest)",
+        "swept_channels": {n: name_to_id[n] for n in sorted(free_response_names) if n in name_to_id},
         "missing": missing,
         "home_channel": {"name": home_name, "id": home_id},
         "soul_channel_directory": soul_updated,
-        "next": "restart the gateway to pick up discord.free_response_channels and the home channel",
+        "next": "restart the gateway to pick up the gateway config and home channel",
     }, indent=2))
     return 0
 

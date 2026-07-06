@@ -62,6 +62,10 @@ DEFAULTS = {
     # writes DISCORD_HOME_CHANNEL into the profile .env. Override per brand with
     # spec discord.home_channel.
     "home_channel": "agent-ace",
+    # The Ascend team holds this role in every brand server. Role-holders are never
+    # swept (their posts get no reply), and their reply within the grace window
+    # releases Ace. Override per brand with spec discord.team_role.
+    "team_role": "Ascend Team",
 }
 
 # SOUL.md managed block: resolve_channels.py writes the live channel-name → <#id> map
@@ -139,6 +143,11 @@ def build_config(spec: dict) -> dict:
             "scoping": channel_scoping(d["discord"]["channels"]),
             # Resolved to DISCORD_HOME_CHANNEL(_NAME) in .env by resolve_channels.py.
             "home_channel": str(d["discord"].get("home_channel") or d["home_channel"]),
+            # Reply gating: the team gets first right of reply; the ace-sweep.py cron
+            # script (zero-token) wakes the agent only for creator messages the team
+            # hasn't answered within sweep_minutes. team_role marks who "the team" is.
+            "sweep_minutes": int(d["discord"].get("sweep_minutes", 5)),
+            "team_role": str(d["discord"].get("team_role") or d["team_role"]),
         },
         "classify_model": d["classify_model"],
         "knowledge_file": "knowledge.yaml",  # the brand knowledge the team maintains in this profile
@@ -174,6 +183,12 @@ def build_cronjobs(spec: dict) -> list[dict]:
     jobs = [
         {"name": "daily-digest", "schedule": "0 9 * * *", "skill": "daily-digest", "deliver": "slack"},
         {"name": "nudge-inactive", "schedule": "0 10 * * *", "skill": "nudge-inactive", "deliver": None},
+        # Reply gating: zero-token pre-script; the agent runs ONLY when the script
+        # surfaces unanswered creator messages ({"wakeAgent": false} otherwise).
+        {"name": "sweep-unanswered", "schedule": "every 2m", "skill": "sweep-unanswered",
+         "script": "ace-sweep.py", "deliver": "discord",
+         "prompt": "Handle the unanswered creator messages surfaced above, following the "
+                   "sweep-unanswered skill exactly. End with only [SILENT]."},
     ]
     if post_target:
         jobs.append(
@@ -313,6 +328,20 @@ def upsert_channel_directory(soul_text: str, block: str) -> str:
     return soul_text.rstrip("\n") + "\n\n" + block + "\n"
 
 
+def install_sweep_script(profile: Path) -> None:
+    """Copy the sweep pre-script into <profile>/scripts/ — Hermes only runs cron scripts
+    from there. Copied (not symlinked) so the profile is self-contained; a setup-brand
+    re-run refreshes it, same as the rest of the baseline."""
+    src = Path(__file__).resolve().parents[2] / "sweep-unanswered" / "scripts" / "sweep.py"
+    if not src.exists():
+        return
+    dest_dir = profile / "scripts"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / "ace-sweep.py"
+    dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    dest.chmod(0o755)
+
+
 def write_profile(spec: dict, profile_dir: str | Path) -> dict:
     validate_spec(spec)
     profile = Path(profile_dir)
@@ -330,6 +359,7 @@ def write_profile(spec: dict, profile_dir: str | Path) -> dict:
         if block:
             soul = upsert_channel_directory(soul, block)
     soul_path.write_text(soul, encoding="utf-8")
+    install_sweep_script(profile)
     # The agnostic seam: point the core at this profile's data dir via ACE_DATA_DIR (merged, not clobbered).
     data_dir = (profile / "ace").resolve()
     env_path = ensure_env(profile, {"ACE_DATA_DIR": str(data_dir)})

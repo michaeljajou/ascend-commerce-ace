@@ -39,12 +39,13 @@ def make_profile(tmp_path, *, home_channel=None, directory_channels=None, with_s
     return tmp_path
 
 
-def test_resolves_free_response_home_and_soul(tmp_path):
+def test_wires_mention_only_gateway_home_and_soul(tmp_path):
     make_profile(tmp_path)
     assert resolve_channels.main(["--profile-dir", str(tmp_path)]) == 0
 
     cfg = yaml.safe_load((tmp_path / "config.yaml").read_text())
-    assert cfg["discord"]["free_response_channels"] == "101,102"
+    # Mention-only: no live free-response; the sweep cron covers unanswered creators.
+    assert cfg["discord"]["free_response_channels"] == ""
     assert cfg["discord"]["require_mention"] is True
 
     env = (tmp_path / ".env").read_text()

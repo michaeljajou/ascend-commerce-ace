@@ -44,13 +44,25 @@ there is no ingest/embedding step.
    orchestrator-agnostic data-dir contract — `store.py` and `get-knowledge` read only `ACE_DATA_DIR`;
    this skill is the one place that maps Hermes' profile path onto it.
 3. Activate the cron jobs (accept blueprint suggestions or register from `cronjobs.yaml`).
+   The **sweep-unanswered** job is the reply-gating half of the mention-only gateway — register
+   it with its zero-token pre-script (the script gates the agent; a tick with nothing to do
+   never touches the LLM):
+   ```
+   hermes --profile <brand_id> cron create "every 2m" --name sweep-unanswered \
+     --skill sweep-unanswered --script ace-sweep.py --deliver discord \
+     "Handle the unanswered creator messages surfaced above, following the sweep-unanswered skill exactly. End with only [SILENT]."
+   ```
+   (`ace-sweep.py` is installed into `<profile>/scripts/` by `setup.py`. Team members are
+   identified by the **"Ascend Team"** Discord role — the default in every brand; override
+   with `discord.team_role` in the spec. Role-holders are never swept, and their reply
+   within the grace window, default 5 min, releases Ace from answering.)
 3a. **Security hardening is applied automatically** by `setup.py` on every run: `approvals.mode: smart`, `code_execution.mode: strict`, a `command_allowlist` scoped to this brand's own scripts, `session_reset: idle` (60 min), the `terminal` tool stripped from the brand's `discord`/`cli` platform toolsets, and `display.tool_progress: off` / `interim_assistant_messages: false` so no tool chatter leaks into Discord. Do not hand-edit these away without discussing with the operator — the next `setup-brand` re-run restores them.
 3b. **First connect, then resolve channels.** Discord channel IDs don't exist until the bot connects once. Run `hermes --profile <brand_id> gateway run`, confirm "Channel directory built: N target(s)" with N > 0 in the logs, stop it, then run:
     ```
     python /opt/data/ascend-commerce-ace/skills/setup-brand/scripts/resolve_channels.py --profile-dir <profile_dir>
     ```
     This wires three things (idempotent, safe to re-run):
-    - `discord.free_response_channels` in config.yaml — the channels marked `free_response` in the spec, as numeric IDs; those answer without an @mention while `discord.require_mention` stays `true` everywhere else (unlisted channels stay quiet by default).
+    - **Mention-only gateway**: `discord.require_mention: true` with `discord.free_response_channels` cleared. Ace answers @mentions and DMs instantly and hears nothing else live — so team announcements can never draw an accidental reply. Creator messages the team doesn't answer within the grace window are handled by the `sweep-unanswered` cron instead (see step 3).
     - `DISCORD_HOME_CHANNEL` / `DISCORD_HOME_CHANNEL_NAME` in the profile `.env` — Ace's proactive-output channel, resolved from `discord.home_channel` in the spec (**default: `agent-ace`** — every brand server should have an `#agent-ace` ops channel; the script warns if it's missing).
     - The **Channel directory** block in `SOUL.md` — the live `#name → <#id>` map so Ace's channel mentions render as clickable links in Discord.
     Restart the gateway once more after this step.

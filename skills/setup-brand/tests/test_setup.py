@@ -190,3 +190,30 @@ def test_upsert_channel_directory_replaces_in_place():
     out = setup.upsert_channel_directory(old, new_block)
     assert "old" not in out and "new" in out
     assert out.count(setup.CHANNEL_DIR_START) == 1
+
+
+def test_build_config_sweep_and_team_role():
+    cfg = setup.build_config(make_spec())
+    assert cfg["discord"]["sweep_minutes"] == 5              # default grace window
+    assert "team_role" not in cfg["discord"]                 # optional, omitted cleanly
+    spec = make_spec()
+    spec["discord"]["team_role"] = "Team"
+    spec["discord"]["sweep_minutes"] = 10
+    cfg = setup.build_config(spec)
+    assert cfg["discord"]["team_role"] == "Team"
+    assert cfg["discord"]["sweep_minutes"] == 10
+
+
+def test_build_cronjobs_includes_zero_token_sweep():
+    jobs = {j["name"]: j for j in setup.build_cronjobs(make_spec())}
+    sweep = jobs["sweep-unanswered"]
+    assert sweep["schedule"] == "every 2m"
+    assert sweep["script"] == "ace-sweep.py"                 # pre-script gates the agent
+    assert sweep["skill"] == "sweep-unanswered"
+
+
+def test_write_profile_installs_sweep_script(tmp_path):
+    setup.write_profile(make_spec(), tmp_path)
+    installed = tmp_path / "scripts" / "ace-sweep.py"
+    assert installed.exists()
+    assert "wakeAgent" in installed.read_text()              # the silent-tick gate is in place
