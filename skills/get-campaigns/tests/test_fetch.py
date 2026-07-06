@@ -74,3 +74,14 @@ def test_main_errors_without_token(tmp_path, monkeypatch):
 def test_main_errors_without_directory(tmp_path, monkeypatch):
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "tok")
     assert fetch.main(["--profile-dir", str(tmp_path)]) == 1
+
+
+def test_summarize_skips_bot_authors():
+    """Ace's own reply in the channel must never become the 'active' campaign."""
+    out = fetch.summarize([
+        {"content": "Love this! Happy to help!", "author": {"username": "ace", "bot": True},
+         "timestamp": "2026-07-03T15:42:32Z"},
+        msg("JUNE PERFORMANCE INCENTIVE CAMPAIGN", author="nimam_9", ts="2026-07-03T15:42:15Z"),
+    ])
+    assert out["active"]["content"] == "JUNE PERFORMANCE INCENTIVE CAMPAIGN"
+    assert all("Love this" not in p["content"] for p in out["previous"])

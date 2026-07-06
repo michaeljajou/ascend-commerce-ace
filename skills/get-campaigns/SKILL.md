@@ -1,7 +1,7 @@
 ---
 name: get-campaigns
 description: Pull the brand's ACTIVE campaigns/challenges live from its Discord channels (newest post = active). Grounding source of truth for anything currently running — never fabricate.
-version: 0.1.0
+version: 0.1.1
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -39,6 +39,9 @@ python ${HERMES_SKILL_DIR}/scripts/fetch.py --channels campaigns --limit 20   # 
 ## Pitfalls
 - The newest post is the active one **by convention** — do not second-guess it or prefer an older
   post that "looks more like" a campaign.
+- Bot-authored messages (including Ace's own replies in the channel) are excluded automatically —
+  the active post is the newest **human/team** post. If the team ever launches campaigns via a
+  webhook/bot, that poster needs an exception here first.
 - Details absent from the post (exact rates, dates) are absent, period → answer the covered part,
   escalate the rest. Never fill gaps from memory or from stale `knowledge.yaml` campaign entries.
 - `previous` posts are context for history questions only — never present one as currently active.

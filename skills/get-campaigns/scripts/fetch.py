@@ -74,11 +74,15 @@ def fetch_messages(token: str, channel_id: str, limit: int) -> list[dict]:
 
 
 def summarize(messages: list[dict]) -> dict:
-    """Newest text post = active; the rest = previous. Ignores empty/attachment-only posts."""
+    """Newest text post = active; the rest = previous.
+
+    Ignores empty/attachment-only posts AND bot-authored ones — Ace's own replies
+    (or any other bot) in the channel must never be mistaken for the campaign.
+    """
     posts = []
     for m in messages:
         content = (m.get("content") or "").strip()
-        if not content:
+        if not content or (m.get("author") or {}).get("bot"):
             continue
         posts.append({
             "posted_at": m.get("timestamp"),
