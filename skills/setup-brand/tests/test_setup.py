@@ -195,12 +195,12 @@ def test_upsert_channel_directory_replaces_in_place():
 def test_build_config_sweep_and_team_role():
     cfg = setup.build_config(make_spec())
     assert cfg["discord"]["sweep_minutes"] == 5              # default grace window
-    assert "team_role" not in cfg["discord"]                 # optional, omitted cleanly
+    assert cfg["discord"]["team_role"] == "Ascend Team"      # bundle default, all brands
     spec = make_spec()
-    spec["discord"]["team_role"] = "Team"
+    spec["discord"]["team_role"] = "Other Team"
     spec["discord"]["sweep_minutes"] = 10
     cfg = setup.build_config(spec)
-    assert cfg["discord"]["team_role"] == "Team"
+    assert cfg["discord"]["team_role"] == "Other Team"
     assert cfg["discord"]["sweep_minutes"] == 10
 
 
