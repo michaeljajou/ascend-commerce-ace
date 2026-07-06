@@ -81,6 +81,8 @@ Optional — use if given, otherwise **omit from the spec** (a default applies; 
    `cronjobs.yaml`, and `ACE_DATA_DIR` into the profile.
 4. Report success and the remaining operator steps:
    - `<brand_id> setup` — attach the OpenRouter key + Discord/Slack tokens (secure).
+   - `<brand_id> chat` -> `/setup-brand` (or re-run `setup.py --spec`) applies channel scoping, SOUL.md, cron jobs, AND the security hardening baseline (approvals=smart, code_execution=strict, command_allowlist, session_reset=idle, terminal tool removed from discord/cli toolsets, tool progress hidden). This is forced on every run — it is not a suggestion the brand team can quietly disable.
+   - First gateway connect, then run `resolve_channels.py` (see setup-brand skill) to populate `discord.free_response_channels` with real channel IDs. Skipping this means the bot requires an @mention everywhere, even in channels meant to be fully active.
    - Drop the brand's `knowledge.yaml` into the data dir (`<profile>/ace`); the brand team keeps it
      current thereafter.
 

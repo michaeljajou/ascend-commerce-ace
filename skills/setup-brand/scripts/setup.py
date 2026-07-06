@@ -189,10 +189,86 @@ def ensure_env(profile_dir: str | Path, updates: dict[str, str]) -> str:
     return str(env_path)
 
 
+# Security hardening baseline applied to EVERY brand profile. These are forced
+# (not setdefault) because they are the security posture, not a per-brand style
+# choice — an operator who wants to loosen one after setup can hand-edit
+# config.yaml; re-running setup-brand re-applies the baseline.
+_SECURITY_COMMAND_ALLOWLIST_TEMPLATE = [
+    "python3 {ace_root}/skills/*",
+    "python3 {ace_root}/skills-admin/*",
+    "python3 {profile_dir}/ace/*",
+    "python3 {profile_dir}/skills/*",
+    "hermes --profile {brand_id}",
+    "hermes profile {brand_id}",
+]
+
+
+def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path") -> None:
+    """Force the validated security baseline onto a brand's config.yaml.
+
+    Rationale (validated on test-brand, see SETUP_BRAND security incident notes):
+      - approvals.mode=smart: brand agents get zero-friction approved-script
+        execution but genuinely dangerous commands are still blocked/reviewed.
+        NEVER 'off' — that disables all safety checks including for shell access.
+      - code_execution.mode=strict: execute_code runs isolated, no project deps
+        leak into the sandbox.
+      - command_allowlist: scoped ONLY to this brand's own script paths + the
+        shared Ace bundle — brand agents cannot run arbitrary shell commands.
+      - terminal tool is REMOVED from discord/cli platform_toolsets: a brand
+        support bot never needs a shell; it only needs its approved scripts,
+        which run through execute_code / the allowlisted commands above.
+      - session_reset=idle (60min): prevents a single long-running Discord
+        session from accumulating poisoned context indefinitely. A stale
+        session that once saw a leaked value or a bad instruction keeps
+        repeating it turn after turn even after config/SOUL.md is fixed,
+        because the fix only applies to NEW sessions. Idle reset guarantees
+        every extended conversation eventually starts clean.
+      - display.tool_progress=off / interim_assistant_messages=false: no
+        tool-call/skill-loading chatter or command-approval prompts leak into
+        the brand's Discord channel — the creator only sees the final answer.
+    """
+    ace_root = str(Path(__file__).resolve().parents[3])
+
+    existing["approvals"] = {
+        **(existing.get("approvals") or {}),
+        "mode": "smart",
+    }
+    existing["code_execution"] = {
+        **(existing.get("code_execution") or {}),
+        "mode": "strict",
+    }
+    existing["command_allowlist"] = [
+        p.format(ace_root=ace_root, profile_dir=str(profile_dir), brand_id=spec["brand_id"])
+        for p in _SECURITY_COMMAND_ALLOWLIST_TEMPLATE
+    ]
+    existing["session_reset"] = {
+        "mode": "idle",
+        "idle_minutes": 60,
+    }
+
+    platform_toolsets = existing.setdefault("platform_toolsets", {})
+    for platform in ("discord", "cli"):
+        current = platform_toolsets.get(platform)
+        if not isinstance(current, list):
+            # Hermes' own profile defaults populate this on `hermes profile create`;
+            # if it's somehow missing, don't invent a full toolset list here — just
+            # ensure 'terminal' can never sneak back in on the next line.
+            current = []
+        platform_toolsets[platform] = [t for t in current if t != "terminal"]
+
+    display = existing.setdefault("display", {})
+    display["tool_progress"] = "off"
+    display["interim_assistant_messages"] = False
+
+
 def merge_config(config_path: str | Path, spec: dict) -> None:
     """Merge Ace's brand config into the profile config.yaml WITHOUT clobbering Hermes' own keys
     (model, skills.external_dirs, …). Ace metadata goes under `ace:`; the answer model is set at
     Hermes' top-level `model:` only when the spec specifies one (else the brand inherits the default).
+
+    Also forces the security hardening baseline (see _apply_security_defaults) on every run —
+    this is the one place brand security posture is enforced, so it must not be skippable by a
+    stale or hand-edited config.yaml surviving a re-run.
     """
     import yaml  # PyYAML is a declared dep; needed to preserve existing Hermes config
 
@@ -202,11 +278,7 @@ def merge_config(config_path: str | Path, spec: dict) -> None:
     existing["ace"] = build_config(spec)
     if spec.get("model"):
         existing["model"] = spec["model"]  # Hermes reads top-level model; omit → inherit default
-    # Client-facing brand chat stays quiet: no tool-progress breadcrumbs, no mid-turn assistant notes.
-    # setdefault → a deliberate per-profile override is preserved on re-run.
-    display = existing.setdefault("display", {})
-    display.setdefault("tool_progress", "off")
-    display.setdefault("interim_assistant_messages", False)
+    _apply_security_defaults(existing, spec, path.parent)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(existing, sort_keys=False), encoding="utf-8")
 
