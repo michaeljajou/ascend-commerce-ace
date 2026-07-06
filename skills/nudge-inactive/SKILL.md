@@ -1,7 +1,7 @@
 ---
 name: nudge-inactive
 description: Gently nudge creators inactive ~48h after onboarding; flag still-inactive creators (7d) to the team in Slack.
-version: 0.1.0
+version: 0.2.0
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -27,7 +27,11 @@ Daily (blueprint). Acts only on creators who completed onboarding.
    Output: `{"nudge": ["@..."], "flag": ["@..."]}`.
 2. For each `nudge` handle → send a short, friendly DM/mention pointing to something easy to do
    (introduce themselves, join the current campaign). Ground specifics with `get-knowledge`.
-3. For each `flag` handle → post a brief note in the brand Slack channel so the team can reach out.
+3. For each `flag` handle → post a brief note to the team Slack channel so the team can reach
+   out (the script brand-tags it automatically):
+   ```
+   python ${HERMES_SKILL_DIR}/../_lib/slack_cli.py post --text "<who's inactive and since when>"
+   ```
 
 ## Pitfalls
 - Keep nudges light and infrequent — one per creator per run, never a barrage.

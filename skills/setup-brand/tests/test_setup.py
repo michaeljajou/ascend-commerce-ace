@@ -68,9 +68,9 @@ def test_model_and_slack_optional(monkeypatch):
     monkeypatch.delenv("ACE_DEFAULT_SLACK_CHANNEL", raising=False)
     monkeypatch.delenv("HERMES_HOME", raising=False)
     cfg = setup.build_config(spec)              # no model, no slack, no env
-    assert "slack_channel" not in cfg          # omitted, not crashed
+    assert cfg["slack_channel"] == "#ace-escalations"   # shared all-brands default
     monkeypatch.setenv("ACE_DEFAULT_SLACK_CHANNEL", "#ace-ops")
-    assert setup.build_config(spec)["slack_channel"] == "#ace-ops"   # env default applied
+    assert setup.build_config(spec)["slack_channel"] == "#ace-ops"   # env/root config wins over default
 
 
 def test_merge_config_preserves_hermes_keys(tmp_path):
@@ -117,7 +117,7 @@ def test_build_cronjobs_targets_post_channel():
     jobs = {j["name"]: j for j in setup.build_cronjobs(make_spec())}
     assert set(jobs) >= {"daily-digest", "nudge-inactive", "weekly-reminders"}
     assert "ingest-knowledge" not in jobs  # no ingest step with YAML knowledge
-    assert jobs["daily-digest"]["deliver"] == "slack"
+    assert jobs["daily-digest"]["deliver"] is None   # digest posts via slack_cli.py itself
     assert jobs["weekly-reminders"]["deliver"] == "discord:#announcements"
 
 
@@ -217,3 +217,14 @@ def test_write_profile_installs_sweep_script(tmp_path):
     installed = tmp_path / "scripts" / "ace-sweep.py"
     assert installed.exists()
     assert "wakeAgent" in installed.read_text()              # the silent-tick gate is in place
+
+
+def test_merge_config_sets_eastern_timezone_default(tmp_path):
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    setup.merge_config(cfg, make_spec())
+    assert yaml.safe_load(cfg.read_text())["timezone"] == "America/New_York"
+    cfg.write_text(yaml.safe_dump({"timezone": "Europe/London"}), encoding="utf-8")
+    setup.merge_config(cfg, make_spec())
+    assert yaml.safe_load(cfg.read_text())["timezone"] == "Europe/London"   # override survives

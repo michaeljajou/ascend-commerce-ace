@@ -137,6 +137,7 @@ def build_config(spec: dict) -> dict:
     d = {**DEFAULTS, **spec}
     cfg = {
         "brand_id": d["brand_id"],
+        "brand_name": d.get("brand_name", d["brand_id"]),  # scripts stamp this on Slack posts
         "discord": {
             "guild_id": str(d["discord"]["guild_id"]),
             "channels": d["discord"]["channels"],
@@ -152,9 +153,9 @@ def build_config(spec: dict) -> dict:
         "classify_model": d["classify_model"],
         "knowledge_file": "knowledge.yaml",  # the brand knowledge the team maintains in this profile
     }
-    slack = spec.get("slack_channel") or _default_slack()
-    if slack:
-        cfg["slack_channel"] = slack
+    # All brands share one escalation channel by default; slack_cli.py brand-tags
+    # every post so the team can tell brands apart.
+    cfg["slack_channel"] = spec.get("slack_channel") or _default_slack() or "#ace-escalations"
     if d.get("growi_project"):
         cfg["growi_project"] = d["growi_project"]
     return cfg
@@ -167,7 +168,7 @@ def render_soul(spec: dict, template_path: Path | None = None) -> str:
     summary = "\n".join(
         f"- #{ch}: {behavior}" for ch, behavior in sorted(d["discord"]["channels"].items())
     )
-    slack = spec.get("slack_channel") or _default_slack() or "the team's Slack channel"
+    slack = spec.get("slack_channel") or _default_slack() or "#ace-escalations"
     return tmpl.format(
         brand_name=d.get("brand_name", d["brand_id"]),
         voice=d["voice"],
@@ -181,7 +182,9 @@ def build_cronjobs(spec: dict) -> list[dict]:
     scoping = channel_scoping(spec["discord"]["channels"])
     post_target = scoping["post_targets"][0] if scoping["post_targets"] else None
     jobs = [
-        {"name": "daily-digest", "schedule": "0 9 * * *", "skill": "daily-digest", "deliver": "slack"},
+        # daily-digest posts to Slack itself (via _lib/slack_cli.py, brand-tagged) — no cron
+        # delivery target; brand profiles have no Slack gateway, only the outbound bot token.
+        {"name": "daily-digest", "schedule": "0 9 * * *", "skill": "daily-digest", "deliver": None},
         {"name": "nudge-inactive", "schedule": "0 10 * * *", "skill": "nudge-inactive", "deliver": None},
         # Reply gating: zero-token pre-script; the agent runs ONLY when the script
         # surfaces unanswered creator messages ({"wakeAgent": false} otherwise).
@@ -287,6 +290,11 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path") ->
     display = existing.setdefault("display", {})
     display["tool_progress"] = "off"
     display["interim_assistant_messages"] = False
+
+    # Ascend operates on US Eastern: cron schedules ("0 9 * * *" = 9 AM), log timestamps,
+    # and prompt time injection all follow this. IANA zone → DST handled by Hermes.
+    # setdefault → a deliberate per-brand override survives re-runs.
+    existing.setdefault("timezone", "America/New_York")
 
 
 def merge_config(config_path: str | Path, spec: dict) -> None:

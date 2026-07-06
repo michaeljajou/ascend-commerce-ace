@@ -1,7 +1,7 @@
 ---
 name: escalate-to-team
 description: Hand a question or issue to the brand's Slack channel with full context, and log it for KB improvement.
-version: 0.1.0
+version: 0.2.0
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -21,8 +21,15 @@ renegotiation, and escalated complaints.
 - A creator asks to renegotiate a deal or raises a complaint Ace can't resolve.
 
 ## Procedure
-1. **Acknowledge the creator** in-channel: tell them you're flagging it to the team — never go silent.
-2. **Post to the brand Slack channel** (via Hermes' Slack delivery) with:
+1. **Acknowledge the creator** in-channel: tell them you're flagging it to the team — never go
+   silent. (Exception: when invoked by `sweep-unanswered` for a creative-strategist question,
+   skip the acknowledgment — the strategist replies in-channel themselves.)
+2. **Post to the team Slack channel** — all brands share it, and the script automatically
+   prefixes your message with this brand's tag (`[<brand>]`), so just write the summary:
+   ```
+   python ${HERMES_SKILL_DIR}/../_lib/slack_cli.py post --text "<summary>"
+   ```
+   The summary must contain:
    - Which Discord channel it came from
    - Creator name / handle
    - The question or issue
@@ -42,6 +49,7 @@ renegotiation, and escalated complaints.
 - Don't attempt the answer "anyway" after deciding to escalate.
 
 ## Verification
-- The creator receives a polite acknowledgment.
-- The Slack post contains all six context fields and a clear "needed from team".
+- The creator receives a polite acknowledgment (except in sweep mode for creative questions).
+- The Slack post starts with the `[<brand>]` tag and contains all six context fields and a
+  clear "needed from team".
 - An `escalated` (or `routed`) interaction is recorded in the store.
