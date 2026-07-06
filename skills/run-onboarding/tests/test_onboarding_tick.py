@@ -265,3 +265,34 @@ def test_escalation_posts_to_slack_and_resolves_on_checkmark(tmp_path, monkeypat
     fakes.reactions["111.222"] = ["white_check_mark"]                    # team clicks ✅
     run_tick(tmp_path, monkeypatch, fakes)
     assert db_row(tmp_path, "@silent")["onboarding_state"] == "resolved"
+
+
+def test_unreadable_channel_does_not_abort_the_tick(tmp_path, monkeypatch):
+    """A private channel the bot can't read (403) must not kill the whole pass."""
+    import urllib.error
+
+    make_profile(tmp_path)
+    seed_state(tmp_path)
+    (tmp_path / "channel_directory.json").write_text(json.dumps({"platforms": {"discord": [
+        {"id": "666", "name": "private-team", "type": "channel"},   # bot can't read this
+        {"id": "555", "name": "community-chat", "type": "channel"},
+        {"id": "900", "name": "onboarding", "type": "channel"},
+    ]}}), encoding="utf-8")
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "newbie"}, "roles": []}])
+    real_discord = fakes.discord
+
+    def discord_with_403(token, path, payload=None, method=None):
+        if "/channels/666/" in path:
+            raise urllib.error.HTTPError(path, 403, "Forbidden", None, None)
+        return real_discord(token, path, payload, method)
+
+    monkeypatch.setattr(tick, "discord", discord_with_403)
+    monkeypatch.setattr(tick, "slack", fakes.slack)
+    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert tick.main(["--profile-dir", str(tmp_path)]) == 0
+    assert db_row(tmp_path, "@newbie")["onboarding_state"] == "collecting"   # join still processed

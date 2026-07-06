@@ -343,7 +343,10 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 cursor = state["cursors"].get(c["id"])
                 if cursor is None:
-                    msgs = discord(token, f"/channels/{c['id']}/messages?limit=1")
+                    try:
+                        msgs = discord(token, f"/channels/{c['id']}/messages?limit=1")
+                    except urllib.error.HTTPError:
+                        continue  # channel the bot can't read (private) — skip, retry next tick
                     state["cursors"][c["id"]] = msgs[0]["id"] if msgs else "0"
                     continue
                 try:
