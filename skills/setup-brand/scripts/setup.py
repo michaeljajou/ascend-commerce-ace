@@ -385,6 +385,7 @@ def upsert_channel_directory(soul_text: str, block: str) -> str:
 PROFILE_SCRIPTS = {
     "ace-sweep.py": "sweep-unanswered/scripts/sweep.py",
     "ace-onboarding-tick.py": "run-onboarding/scripts/onboarding_tick.py",
+    "ace-join-listener.py": "run-onboarding/scripts/join_listener.py",
 }
 
 

@@ -181,6 +181,58 @@ def escalation_text(row: dict, brand: str, now: datetime) -> str:
 
 # ── db helpers (standalone mirror of the store contract) ──────────────────────
 
+def acquire_lock(profile: Path):
+    """One tick at a time: the cron run and listener-triggered runs must not overlap
+    (a race could double-onboard a joiner). Returns the held lock fd, or None if busy."""
+    import fcntl
+
+    lock_path = profile / "ace" / "onboarding_tick.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = open(lock_path, "w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except OSError:
+        fd.close()
+        return None
+
+
+def listener_pid(profile: Path) -> int | None:
+    pid_path = profile / "ace" / "onboarding_listener.pid"
+    try:
+        pid = int(pid_path.read_text().strip())
+        os.kill(pid, 0)  # alive?
+        return pid
+    except (OSError, ValueError):
+        return None
+
+
+def ensure_listener(profile: Path, enabled: bool) -> None:
+    """Watchdog for the instant-join listener: start it when onboarding is on (and it's
+    not running), stop it when onboarding is turned off. The poll below stays as the
+    fallback either way — the listener is a latency upgrade, not a dependency."""
+    import signal
+    import subprocess
+
+    pid = listener_pid(profile)
+    listener = profile / "scripts" / "ace-join-listener.py"
+    if enabled and pid is None and listener.exists():
+        log_dir = profile / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log = open(log_dir / "onboarding-listener.log", "ab")
+        subprocess.Popen(
+            [sys.executable, str(listener), "--profile-dir", str(profile)],
+            stdout=log, stderr=log, start_new_session=True,
+        )
+        print("onboarding: started the instant-join listener.", file=sys.stderr)
+    elif not enabled and pid is not None:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            print("onboarding: stopped the instant-join listener (disabled).", file=sys.stderr)
+        except OSError:
+            pass
+
+
 def open_db(profile: Path) -> sqlite3.Connection:
     db = profile / "ace" / "ace.db"
     db.parent.mkdir(parents=True, exist_ok=True)
@@ -250,6 +302,10 @@ def archive_thread(token: str, thread_id: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--profile-dir", default=os.environ.get("HERMES_HOME", "."))
+    ap.add_argument("--joins-only", action="store_true",
+                    help="member sync only (used by the instant-join listener); timers, "
+                         "engagement, and escalations stay with the cron run, which is the "
+                         "only run that can wake the agent")
     args = ap.parse_args(argv)
     profile = Path(args.profile_dir)
     now = datetime.now(timezone.utc)
@@ -259,8 +315,15 @@ def main(argv: list[str] | None = None) -> int:
     config = yaml.safe_load((profile / "config.yaml").read_text(encoding="utf-8")) or {}
     ace = config.get("ace") or {}
     ob = ace.get("onboarding") or {}
+    if not args.joins_only:  # the cron run supervises the listener (start/stop with the switch)
+        ensure_listener(profile, bool(ob.get("enabled")))
     if not ob.get("enabled"):
         print(SILENT)  # master switch off — the whole workflow is inert
+        return 0
+
+    lock = acquire_lock(profile)
+    if lock is None:
+        print(SILENT)  # another run (cron or listener-triggered) is mid-flight
         return 0
 
     token = env_token(profile, "DISCORD_BOT_TOKEN")
@@ -330,6 +393,10 @@ def main(argv: list[str] | None = None) -> int:
                     if r["thread_id"]:
                         archive_thread(token, r["thread_id"])
                     print(f"onboarding: {r['handle']} left mid-flow — timers stopped.", file=sys.stderr)
+
+        if args.joins_only:
+            print(SILENT)  # joins/leavers handled; everything else belongs to the cron run
+            return 0
 
         # 3. engagement scan: any post anywhere → guided/nudged creators become active
         directory_path = profile / "channel_directory.json"

@@ -296,3 +296,65 @@ def test_unreadable_channel_does_not_abort_the_tick(tmp_path, monkeypatch):
     with redirect_stdout(buf):
         assert tick.main(["--profile-dir", str(tmp_path)]) == 0
     assert db_row(tmp_path, "@newbie")["onboarding_state"] == "collecting"   # join still processed
+
+
+def test_joins_only_onboards_but_never_touches_timers(tmp_path, monkeypatch):
+    """Listener-triggered runs handle joins; nudges must stay with the cron run
+    (only cron output can wake the agent)."""
+    make_profile(tmp_path)
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, guided_at, joined_at)"
+                 " VALUES ('@quiet','guided','66','7009',?,?)", (ts_ago(minutes=5), ts_ago(minutes=6)))
+    conn.commit()
+    fakes = FakeAPIs(members=[
+        {"user": {"id": "66", "username": "quiet"}, "roles": []},
+        {"user": {"id": "77", "username": "newbie"}, "roles": []},
+    ])
+    monkeypatch.setattr(tick, "discord", fakes.discord)
+    monkeypatch.setattr(tick, "slack", fakes.slack)
+    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert tick.main(["--profile-dir", str(tmp_path), "--joins-only"]) == 0
+    assert json.loads(buf.getvalue().strip()) == {"wakeAgent": False}
+    assert db_row(tmp_path, "@newbie")["onboarding_state"] == "collecting"  # join handled
+    assert db_row(tmp_path, "@quiet")["onboarding_state"] == "guided"       # nudge NOT consumed
+
+
+def test_lock_prevents_overlapping_runs(tmp_path, monkeypatch):
+    import fcntl
+
+    make_profile(tmp_path)
+    seed_state(tmp_path)
+    (tmp_path / "ace" / "onboarding_tick.lock").parent.mkdir(exist_ok=True)
+    holder = open(tmp_path / "ace" / "onboarding_tick.lock", "w")
+    fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)                      # simulate a run mid-flight
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "newbie"}, "roles": []}])
+    out = run_tick(tmp_path, monkeypatch, fakes)
+    assert json.loads(out) == {"wakeAgent": False}
+    assert db_row(tmp_path, "@newbie") is None                              # skipped entirely
+    holder.close()
+
+
+def test_watchdog_starts_and_stops_listener(tmp_path, monkeypatch):
+    import subprocess as sp
+
+    make_profile(tmp_path)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "ace-join-listener.py").write_text("# listener", encoding="utf-8")
+    spawned = []
+    monkeypatch.setattr(sp, "Popen", lambda cmd, **kw: spawned.append(cmd) or type("P", (), {"pid": 999})())
+    tick.ensure_listener(tmp_path, True)
+    assert spawned and "ace-join-listener.py" in spawned[0][1]
+
+    killed = []
+    (tmp_path / "ace").mkdir(exist_ok=True)
+    (tmp_path / "ace" / "onboarding_listener.pid").write_text("4242", encoding="utf-8")
+    real_kill = tick.os.kill
+    monkeypatch.setattr(tick.os, "kill", lambda pid, sig: killed.append((pid, sig)) if pid == 4242 else real_kill(pid, sig))
+    tick.ensure_listener(tmp_path, False)                                   # switch off → stop it
+    assert (4242, 15) in killed
