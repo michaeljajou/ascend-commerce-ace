@@ -68,10 +68,10 @@ def test_reset_returns_to_start_keeping_identity(conn):
     out = onboarding.reset(conn, "@ava", now=400.0)
     assert out["reset"] is True
     row = onboarding.status(conn, "@ava")
-    assert row["onboarding_state"] == "collecting"
+    assert row["onboarding_state"] == "new"   # 'new' = the tick re-onboards with a fresh thread
     assert row["tiktok"] is None and row["email"] is None and row["retries"] == 0
     assert row["guided_at"] is None and row["nudged_at"] is None
-    assert row["thread_id"] == "th1"          # identity + space preserved
+    assert row["thread_id"] == "th1"          # kept so the tick can archive the old thread
 
 
 def test_resolve_and_flag(conn):

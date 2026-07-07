@@ -297,6 +297,14 @@ def onboard_new_member(conn, token: str, member: dict, cfg: dict, now: datetime)
     user = member["user"]
     handle = f"@{user['username']}"
     channel_id = cfg["channel_id"]
+    # Re-onboarding (team reset / rejoin-after-reset): the old private thread is dead
+    # weight — leaving the server revoked their access to it. Archive it, start fresh.
+    old = conn.execute(
+        "SELECT thread_id FROM creators WHERE handle = ? OR discord_id = ?",
+        (handle, user["id"]),
+    ).fetchone()
+    if old and old["thread_id"]:
+        archive_thread(token, old["thread_id"])
     thread = discord(token, f"/channels/{channel_id}/threads", {
         "name": f"welcome-{user['username']}"[:100],
         "type": 12,                      # private thread
@@ -391,8 +399,11 @@ def main(argv: list[str] | None = None) -> int:
         # 1+2. member sync: joins + leavers
         members = list_all_members(token, guild_id)
         member_ids = {m["user"]["id"] for m in members if m.get("user")}
-        known = {r["discord_id"] for r in
-                 conn.execute("SELECT discord_id FROM creators WHERE discord_id IS NOT NULL")}
+        # state='new' means "re-onboard me" (the team's reset command sets it) — those
+        # rows are deliberately NOT known, so the member sync picks them up again.
+        known = {r["discord_id"] for r in conn.execute(
+            "SELECT discord_id FROM creators WHERE discord_id IS NOT NULL"
+            " AND onboarding_state != 'new'")}
         if not state.get("member_baseline_done"):
             # First enabled tick: existing members were onboarded by Vaulty — record, don't re-run.
             for m in members:
@@ -469,7 +480,8 @@ def main(argv: list[str] | None = None) -> int:
                          "thread_id": r["thread_id"], "nudge_via": ob.get("nudge_via", "dm")})
 
         # 4b. escalations → pure-script Slack post, zero tokens
-        slack_token = env_token(profile, "SLACK_BOT_TOKEN")
+        # (ACE_ prefix: a bare SLACK_BOT_TOKEN makes the gateway retry a Slack platform forever)
+        slack_token = env_token(profile, "ACE_SLACK_BOT_TOKEN") or env_token(profile, "SLACK_BOT_TOKEN")
         for r in due_escalations(rows, now, escalate_window):
             if not slack_token:
                 print("onboarding: escalation due but no SLACK_BOT_TOKEN — skipping.", file=sys.stderr)

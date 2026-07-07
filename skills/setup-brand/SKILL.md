@@ -36,8 +36,9 @@ marked *(portal)* live in the Discord **Developer Portal**; *(server)* items liv
 4. *(server)* Create the **#agent-ace** channel (Ace's home for cron output/notifications;
    resolve_channels wires it automatically).
 5. *(Slack)* Invite the workspace's Hermes bot to **#ace-escalations** (`/invite @<bot>`), and
-   copy `SLACK_BOT_TOKEN` (bot token ONLY — never `SLACK_APP_TOKEN`) into the brand profile's
-   `.env` so escalations/digests can post.
+   copy the bot token into the brand profile's `.env` **as `ACE_SLACK_BOT_TOKEN`** (never
+   `SLACK_APP_TOKEN`, and not under the name `SLACK_BOT_TOKEN` — that name makes the brand's
+   gateway try to run a Slack platform and retry-connect forever; brands are outbound-only).
 6. **Before enabling onboarding** (`ace.onboarding.enabled`): turn **Vaulty's join handling
    OFF** on that server — running both risks duplicate onboarding spaces and role conflicts.
 7. After any of the above changes: re-run step 3b (resolve_channels) + restart the gateway.

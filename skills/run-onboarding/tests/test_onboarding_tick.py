@@ -381,3 +381,20 @@ def test_watchdog_disabled_never_spawns(tmp_path, monkeypatch):
     monkeypatch.setattr(sp, "Popen", lambda cmd, **kw: spawned.append(cmd))
     tick.ensure_listener(tmp_path, False)
     assert spawned == []
+
+
+def test_reset_row_gets_reonboarded_with_fresh_thread(tmp_path, monkeypatch):
+    """state='new' (team reset) → the member sync re-onboards them: old thread archived,
+    fresh thread + welcome, state back to collecting."""
+    make_profile(tmp_path)
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at)"
+                 " VALUES ('@redo','new','77','7000',?)", (ts_ago(minutes=1),))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "redo"}, "roles": []}])
+    run_tick(tmp_path, monkeypatch, fakes)
+    row = db_row(tmp_path, "@redo")
+    assert row["onboarding_state"] == "collecting"
+    assert row["thread_id"] == "7001"                                    # fresh thread
+    assert ("/channels/7000", {"archived": True, "locked": False}, "PATCH") in fakes.writes

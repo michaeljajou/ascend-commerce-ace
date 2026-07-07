@@ -105,16 +105,19 @@ def status(conn, handle: str) -> dict:
 
 
 def reset(conn, handle: str, now: float | None = None) -> dict:
-    """Back to the start of the flow (redo / rejoined) — keeps discord_id + thread."""
+    """Back to the start of the flow (redo / rejoined). Sets state to 'new': the next
+    onboarding tick re-onboards them from scratch — fresh private thread (the old one is
+    archived; a rejoiner lost access to it anyway when they left) + fresh welcome."""
     if store.get_onboarding(conn, handle) is None:
         raise ValueError(f"unknown creator {handle!r}")
     store.update_onboarding(
-        conn, handle, onboarding_state=COLLECTING, tiktok=None, email=None, role=None,
+        conn, handle, onboarding_state=NEW, tiktok=None, email=None, role=None,
         retries=0, guided_at=None, nudged_at=None, escalated_at=None,
         escalation_channel=None, escalation_ts=None, resolved_at=None, last_active_at=None,
         joined_at=str(now if now is not None else time.time()),
     )
-    return {"handle": handle, "state": COLLECTING, "reset": True}
+    return {"handle": handle, "state": NEW, "reset": True,
+            "next": "the onboarding tick re-onboards them with a fresh thread within ~2 min"}
 
 
 def resolve(conn, handle: str, now: float | None = None) -> dict:

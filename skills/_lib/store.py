@@ -39,6 +39,14 @@ def data_dir() -> Path:
     """
     if env := os.environ.get("ACE_DATA_DIR"):
         return Path(env)
+    # Hermes strips custom env vars (ACE_DATA_DIR included) from the agent's code
+    # sandbox, but passes HERMES_HOME (= the profile dir). setup-brand always puts the
+    # data dir at <profile>/ace, so this fallback keeps every script grounded in the
+    # REAL profile store instead of silently writing into a throwaway sandbox dir —
+    # the root cause of both the get.py "default path" bug and onboarding records
+    # vanishing mid-conversation.
+    if home := os.environ.get("HERMES_HOME"):
+        return Path(home) / "ace"
     return Path.cwd() / "data"
 
 

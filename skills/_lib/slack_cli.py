@@ -46,14 +46,20 @@ def load_ace_config(profile: Path) -> dict:
 
 
 def bot_token(profile: Path) -> str | None:
-    if tok := os.environ.get("SLACK_BOT_TOKEN"):
-        return tok
+    """Prefer ACE_SLACK_BOT_TOKEN: naming it SLACK_BOT_TOKEN in a brand .env makes the
+    Hermes gateway think the profile has a Slack platform and retry-connect forever
+    (brands are outbound-only). The ACE_ prefix keeps Hermes blind to it."""
+    for key in ("ACE_SLACK_BOT_TOKEN", "SLACK_BOT_TOKEN"):
+        if tok := os.environ.get(key):
+            return tok
     env_path = profile / ".env"
     if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            s = line.strip()
-            if s.startswith("SLACK_BOT_TOKEN="):
-                return s.split("=", 1)[1].strip().strip("'\"") or None
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+        for key in ("ACE_SLACK_BOT_TOKEN=", "SLACK_BOT_TOKEN="):
+            for line in lines:
+                s = line.strip()
+                if s.startswith(key):
+                    return s.split("=", 1)[1].strip().strip("'\"") or None
     return None
 
 

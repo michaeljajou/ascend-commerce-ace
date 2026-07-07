@@ -69,3 +69,12 @@ def test_missing_token_errors(tmp_path, monkeypatch):
     monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "ace"))
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
     assert slack_cli.main(["post", "--text", "hi"]) == 1
+
+
+def test_ace_prefixed_token_wins(tmp_path, monkeypatch):
+    """ACE_SLACK_BOT_TOKEN keeps the Hermes gateway from thinking brands run Slack."""
+    make_profile(tmp_path)
+    (tmp_path / ".env").write_text("ACE_SLACK_BOT_TOKEN=xoxb-ace\nSLACK_BOT_TOKEN=xoxb-old\n",
+                                   encoding="utf-8")
+    rc, calls = run(tmp_path, monkeypatch, ["post", "--text", "hi"])
+    assert rc == 0 and calls["token"] == "xoxb-ace"

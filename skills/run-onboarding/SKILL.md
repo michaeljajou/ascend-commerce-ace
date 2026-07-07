@@ -25,6 +25,10 @@ tell whoever asked that onboarding is currently disabled.
 
 ## Conversation mode
 
+**The creator's handle comes from the THREAD NAME, nothing else**: the thread is named
+`welcome-<username>`, so thread `welcome-jane77` → handle `@jane77`. Never use their display
+name — display names don't match the store record and create phantom rows.
+
 Check where they are first: `python ${HERMES_SKILL_DIR}/scripts/onboarding.py status --handle "@<username>"`
 (if there's no record yet, `start` one). Then continue from the first missing piece:
 
@@ -74,6 +78,12 @@ in the community channel. No guilt-tripping. Deliver per `nudge_via`:
 End your turn with only `[SILENT]`.
 
 ## Pitfalls
+- **NEVER create cron jobs from an onboarding conversation** — no "check later" jobs, no
+  running scripts via cron as a workaround. Cron deliveries leak into the creator's thread
+  as raw "Cronjob Response" spam. If a script fails, run it once more; if it still fails,
+  post the exact error to Slack (`_lib/slack_cli.py`), tell the creator the team will finish
+  their setup, and END the turn. A short clean failure beats a long improvised one.
+- Keep turns short — one question or one step per message. No status chatter, no walls of text.
 - The tick already marked them nudged when it woke you — deliver every nudge you were handed;
   if delivery fails both ways, post the failure to Slack instead of dropping it.
 - `complete` fails without BOTH TikTok and email — that's the guard, not an error to work around.

@@ -38,3 +38,14 @@ def test_feedback_validates_value(conn):
     iid = store.log_interaction(conn, status=ANSWERED)
     with pytest.raises(ValueError):
         store.log_feedback(conn, iid, "sideways")
+
+
+def test_data_dir_falls_back_to_hermes_home(monkeypatch, tmp_path):
+    """The agent sandbox strips ACE_DATA_DIR but passes HERMES_HOME — scripts must
+    still hit the real profile store, not a sandbox-local ./data."""
+    monkeypatch.delenv("ACE_DATA_DIR", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    from _lib import store as store_mod
+    assert store_mod.data_dir() == tmp_path / "ace"
+    monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "explicit"))
+    assert store_mod.data_dir() == tmp_path / "explicit"      # contract var still wins
