@@ -340,7 +340,8 @@ def test_lock_prevents_overlapping_runs(tmp_path, monkeypatch):
     holder.close()
 
 
-def test_watchdog_starts_and_stops_listener(tmp_path, monkeypatch):
+def test_watchdog_spawns_fleet_listener_once(tmp_path, monkeypatch):
+    import os as _os
     import subprocess as sp
 
     make_profile(tmp_path)
@@ -349,12 +350,34 @@ def test_watchdog_starts_and_stops_listener(tmp_path, monkeypatch):
     spawned = []
     monkeypatch.setattr(sp, "Popen", lambda cmd, **kw: spawned.append(cmd) or type("P", (), {"pid": 999})())
     tick.ensure_listener(tmp_path, True)
-    assert spawned and "ace-join-listener.py" in spawned[0][1]
+    assert len(spawned) == 1 and "ace-join-listener.py" in spawned[0][1]
 
-    killed = []
+    # a live fleet pidfile → no double spawn (degenerate root == the profile itself)
+    (tmp_path / "ace-join-listener.pid").write_text(str(_os.getpid()), encoding="utf-8")
+    tick.ensure_listener(tmp_path, True)
+    assert len(spawned) == 1
+
+
+def test_watchdog_kills_legacy_per_brand_listener(tmp_path, monkeypatch):
+    make_profile(tmp_path)
     (tmp_path / "ace").mkdir(exist_ok=True)
     (tmp_path / "ace" / "onboarding_listener.pid").write_text("4242", encoding="utf-8")
+    killed = []
     real_kill = tick.os.kill
-    monkeypatch.setattr(tick.os, "kill", lambda pid, sig: killed.append((pid, sig)) if pid == 4242 else real_kill(pid, sig))
-    tick.ensure_listener(tmp_path, False)                                   # switch off → stop it
-    assert (4242, 15) in killed
+    monkeypatch.setattr(tick.os, "kill",
+                        lambda pid, sig: killed.append((pid, sig)) if pid == 4242 else real_kill(pid, sig))
+    tick.ensure_listener(tmp_path, False)              # even disabled: legacy cleanup runs
+    assert (4242, 15) in killed                        # SIGTERM to the old per-brand process
+    assert not (tmp_path / "ace" / "onboarding_listener.pid").exists()
+
+
+def test_watchdog_disabled_never_spawns(tmp_path, monkeypatch):
+    import subprocess as sp
+
+    make_profile(tmp_path, enabled=False)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "ace-join-listener.py").write_text("# listener", encoding="utf-8")
+    spawned = []
+    monkeypatch.setattr(sp, "Popen", lambda cmd, **kw: spawned.append(cmd))
+    tick.ensure_listener(tmp_path, False)
+    assert spawned == []

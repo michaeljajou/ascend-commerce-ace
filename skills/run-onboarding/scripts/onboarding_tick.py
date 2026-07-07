@@ -197,8 +197,7 @@ def acquire_lock(profile: Path):
         return None
 
 
-def listener_pid(profile: Path) -> int | None:
-    pid_path = profile / "ace" / "onboarding_listener.pid"
+def pid_alive(pid_path: Path) -> int | None:
     try:
         pid = int(pid_path.read_text().strip())
         os.kill(pid, 0)  # alive?
@@ -207,30 +206,60 @@ def listener_pid(profile: Path) -> int | None:
         return None
 
 
+def shared_root(profile: Path) -> Path:
+    """Fleet root for the SHARED join listener: <root>/profiles/<brand> → <root>.
+    Degenerate case (no profiles/ parent): the profile itself."""
+    p = profile.resolve()
+    return p.parents[1] if p.parent.name == "profiles" else p
+
+
 def ensure_listener(profile: Path, enabled: bool) -> None:
-    """Watchdog for the instant-join listener: start it when onboarding is on (and it's
-    not running), stop it when onboarding is turned off. The poll below stays as the
-    fallback either way — the listener is a latency upgrade, not a dependency."""
+    """Watchdog for the SHARED instant-join listener (one process serves every brand —
+    ~40MB total instead of ~55MB per brand). Any enabled brand's tick may respawn it;
+    the listener discovers all enabled brands itself and exits when none remain, so a
+    disabled brand never has to kill it. The 2-minute poll stays as the fallback —
+    the listener is a latency upgrade, not a dependency."""
     import signal
     import subprocess
 
-    pid = listener_pid(profile)
+    # Migration: kill a legacy per-profile listener from the pre-fleet version.
+    legacy_pid_path = profile / "ace" / "onboarding_listener.pid"
+    if legacy := pid_alive(legacy_pid_path):
+        try:
+            os.kill(legacy, signal.SIGTERM)
+            legacy_pid_path.unlink(missing_ok=True)
+            print("onboarding: stopped the legacy per-brand listener (fleet listener replaces it).",
+                  file=sys.stderr)
+        except OSError:
+            pass
+
     listener = profile / "scripts" / "ace-join-listener.py"
-    if enabled and pid is None and listener.exists():
-        log_dir = profile / "logs"
+    if not enabled or not listener.exists():
+        return
+    root = shared_root(profile)
+    if pid_alive(root / "ace-join-listener.pid"):
+        return
+    # Several brands' ticks can race here — one spawner wins via a fleet-level lock.
+    import fcntl
+
+    try:
+        spawn_lock = open(root / "ace-join-listener.lock", "w")
+        fcntl.flock(spawn_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return
+    try:
+        if pid_alive(root / "ace-join-listener.pid"):
+            return
+        log_dir = root / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        log = open(log_dir / "onboarding-listener.log", "ab")
+        log = open(log_dir / "ace-join-listener.log", "ab")
         subprocess.Popen(
             [sys.executable, str(listener), "--profile-dir", str(profile)],
             stdout=log, stderr=log, start_new_session=True,
         )
-        print("onboarding: started the instant-join listener.", file=sys.stderr)
-    elif not enabled and pid is not None:
-        try:
-            os.kill(pid, signal.SIGTERM)
-            print("onboarding: stopped the instant-join listener (disabled).", file=sys.stderr)
-        except OSError:
-            pass
+        print("onboarding: started the fleet join listener.", file=sys.stderr)
+    finally:
+        spawn_lock.close()
 
 
 def open_db(profile: Path) -> sqlite3.Connection:
