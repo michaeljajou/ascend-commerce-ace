@@ -213,7 +213,9 @@ def build_cronjobs(spec: dict) -> list[dict]:
     jobs = [
         # daily-digest posts to Slack itself (via _lib/slack_cli.py, brand-tagged) — no cron
         # delivery target; brand profiles have no Slack gateway, only the outbound bot token.
-        {"name": "daily-digest", "schedule": "0 9 * * *", "skill": "daily-digest", "deliver": None},
+        {"name": "daily-digest", "schedule": "0 9 * * *", "skill": "daily-digest", "deliver": None,
+         "prompt": "Run the daily digest exactly per the daily-digest skill: ONE command "
+                   "(digest.py --post) — it posts to Slack itself. End with only [SILENT]."},
         {"name": "nudge-inactive", "schedule": "0 10 * * *", "skill": "nudge-inactive", "deliver": None},
         # Reply gating: zero-token pre-script; the agent runs ONLY when the script
         # surfaces unanswered creator messages ({"wakeAgent": false} otherwise).

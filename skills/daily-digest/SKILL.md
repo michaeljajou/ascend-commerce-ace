@@ -1,7 +1,7 @@
 ---
 name: daily-digest
 description: Post a 9 AM daily digest to the brand's Slack channel — interactions, answer rate, moderation flags, new members, upcoming deadlines.
-version: 0.2.0
+version: 0.3.0
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -21,20 +21,18 @@ A once-a-day summary for the team, posted to the brand's Slack channel.
 Daily at 9 AM (blueprint, delivered to Slack).
 
 ## Procedure
-1. Build it:
-   ```
-   python ${HERMES_SKILL_DIR}/scripts/digest.py --hours 24 --deadline-days 7
-   ```
-   Output includes a ready-to-post `text` plus the structured `digest`.
-2. Post the `text` to the team Slack channel (the script brand-tags it automatically):
-   ```
-   python ${HERMES_SKILL_DIR}/../_lib/slack_cli.py post --stdin   # pipe the digest text in
-   ```
+ONE command — it builds the digest AND posts the clean, brand-tagged text to Slack itself:
+```
+python ${HERMES_SKILL_DIR}/scripts/digest.py --hours 24 --deadline-days 7 --post
+```
+Then end your turn with only `[SILENT]`. Do NOT pipe the script's output anywhere yourself —
+delivery is the script's job (piping the JSON into Slack is exactly the bug this prevents).
 
 Contents: total interactions (answered vs escalated vs routed), answer rate, 👍/👎, moderation
 actions, new members + how many are mid-onboarding, and upcoming deal deadlines.
 
 ## Pitfalls
+- Never post the JSON output to Slack — `--post` sends only the human-readable text.
 - Read-only: the digest never changes data; safe to re-run.
 - If the window is quiet, post the digest anyway (zeros are informative) — don't skip.
 

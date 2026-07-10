@@ -52,3 +52,33 @@ def test_far_off_deadline_excluded(conn):
     d = digest.build_digest(conn, now=NOW, deadline_days=7)
     handles = {x["handle"] for x in d["upcoming_deadlines"]}
     assert "@late" not in handles
+
+
+def test_post_flag_sends_only_the_rendered_text(tmp_path, monkeypatch, capsys):
+    """--post must deliver the human text, never the JSON blob (the QA bug)."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "_lib"))
+    from _lib import slack_cli
+
+    sent = {}
+
+    def fake_post(token, channel, text):
+        sent.update(channel=channel, text=text)
+        return {"ok": True, "ts": "1.0"}
+
+    monkeypatch.setattr(slack_cli, "post_message", fake_post)
+    import yaml
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"ace": {
+        "brand_id": "pilot", "brand_name": "Pilot", "slack_channel": "#ace-escalations"}}),
+        encoding="utf-8")
+    (tmp_path / ".env").write_text("ACE_SLACK_BOT_TOKEN=tok\n", encoding="utf-8")
+    (tmp_path / "ace").mkdir()
+    monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "ace"))
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("ACE_SLACK_BOT_TOKEN", raising=False)
+
+    assert digest.main(["--post"]) == 0
+    assert sent["text"].startswith("[Pilot] *Ace daily digest*")   # brand tag + human text
+    assert "{" not in sent["text"]                                 # no JSON anywhere

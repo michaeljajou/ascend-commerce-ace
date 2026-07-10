@@ -6,7 +6,8 @@ Aggregates the last 24h from the profile store into a skimmable summary: interac
 and upcoming deal deadlines. Pure `build_digest` so it's unit-testable.
 
 Usage:
-    python digest.py [--hours 24] [--deadline-days 7]
+    python digest.py [--hours 24] [--deadline-days 7]          # print JSON (inspection)
+    python digest.py --post                                    # build AND post to Slack
 """
 
 from __future__ import annotations
@@ -87,11 +88,20 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Build the daily digest.")
     ap.add_argument("--hours", type=float, default=24)
     ap.add_argument("--deadline-days", type=int, default=7)
+    ap.add_argument("--post", action="store_true",
+                    help="post the rendered text to the team Slack channel (brand-tagged) "
+                         "instead of leaving delivery to the caller — deterministic, so the "
+                         "raw JSON can never end up in Slack")
     args = ap.parse_args(argv)
 
     conn = store.connect()
     d = build_digest(conn, hours=args.hours, deadline_days=args.deadline_days)
-    print(json.dumps({"digest": d, "text": render_digest(d)}))
+    text = render_digest(d)
+    if args.post:
+        from _lib import slack_cli
+
+        return slack_cli.main(["post", "--text", text])
+    print(json.dumps({"digest": d, "text": text}))
     return 0
 
 
