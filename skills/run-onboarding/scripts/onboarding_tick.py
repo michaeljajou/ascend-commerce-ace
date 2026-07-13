@@ -137,21 +137,28 @@ def is_new_joiner(member: dict, known_ids: set[str], team_role_id: str | None) -
 
 
 def due_nudges(rows: list[dict], now: datetime, nudge_window: timedelta) -> list[dict]:
-    """state=guided, guidance older than the window, never engaged, never nudged."""
+    """Quiet creators due a nudge, never nudged before:
+    - guided:     the window runs from guidance completion (the normal case)
+    - collecting: they NEVER replied to the welcome — the window runs from joining
+      (without this they'd sit in collecting forever with no timer at all)."""
     out = []
     for r in rows:
-        if r["onboarding_state"] != "guided" or r.get("nudged_at") or not r.get("guided_at"):
+        if r["onboarding_state"] not in ("guided", "collecting") or r.get("nudged_at"):
             continue
-        if now - datetime.fromtimestamp(float(r["guided_at"]), tz=timezone.utc) >= nudge_window:
+        anchor = r.get("guided_at") if r["onboarding_state"] == "guided" else r.get("joined_at")
+        if not anchor:
+            continue
+        if now - datetime.fromtimestamp(float(anchor), tz=timezone.utc) >= nudge_window:
             out.append(r)
     return out
 
 
 def due_escalations(rows: list[dict], now: datetime, escalate_window: timedelta) -> list[dict]:
-    """Still quiet after the escalation window since JOINING (guided or already nudged)."""
+    """Still quiet after the escalation window since JOINING — whether they finished
+    guidance, got nudged, or never replied to the welcome at all (collecting)."""
     out = []
     for r in rows:
-        if r["onboarding_state"] not in ("guided", "nudged") or not r.get("joined_at"):
+        if r["onboarding_state"] not in ("guided", "nudged", "collecting") or not r.get("joined_at"):
             continue
         if now - datetime.fromtimestamp(float(r["joined_at"]), tz=timezone.utc) >= escalate_window:
             out.append(r)
@@ -470,14 +477,16 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"onboarding: {watch_ids[uid]} engaged — timers stopped.", file=sys.stderr)
 
         rows = [dict(r) for r in conn.execute(
-            "SELECT * FROM creators WHERE onboarding_state IN ('guided','nudged','escalated')"
+            "SELECT * FROM creators WHERE onboarding_state IN "
+            "('collecting','guided','nudged','escalated')"
         )]
 
         # 4a. nudges → wake the agent (brand-voice DM); mark on emit (at-most-once)
         for r in due_nudges(rows, now, nudge_window):
             upd(conn, r["handle"], onboarding_state="nudged", nudged_at=str(now.timestamp()))
             wake.append({"handle": r["handle"], "discord_id": r["discord_id"],
-                         "thread_id": r["thread_id"], "nudge_via": ob.get("nudge_via", "dm")})
+                         "thread_id": r["thread_id"], "nudge_via": ob.get("nudge_via", "dm"),
+                         "stage": r["onboarding_state"]})  # collecting = never replied to welcome
 
         # 4b. escalations → pure-script Slack post, zero tokens
         # (ACE_ prefix: a bare SLACK_BOT_TOKEN makes the gateway retry a Slack platform forever)

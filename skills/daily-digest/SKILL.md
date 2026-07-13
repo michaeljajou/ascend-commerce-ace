@@ -33,6 +33,10 @@ actions, new members + how many are mid-onboarding, and upcoming deal deadlines.
 
 ## Pitfalls
 - Never post the JSON output to Slack — `--post` sends only the human-readable text.
+- **If the command fails** (non-zero exit, any error output): retry it ONCE; if it fails again,
+  your final response must be the error text — **NEVER `[SILENT]` after a failure**. A silent
+  failed digest looks identical to a successful one, and nobody finds out for days.
+- Never edit skill files or create cron jobs — run the one command and stop.
 - Read-only: the digest never changes data; safe to re-run.
 - If the window is quiet, post the digest anyway (zeros are informative) — don't skip.
 

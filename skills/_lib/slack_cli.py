@@ -103,7 +103,15 @@ def main(argv: list[str] | None = None) -> int:
               "must add the bot token to this profile for Slack escalations.", file=sys.stderr)
         return 1
 
-    result = post_message(token, channel, text)
+    import urllib.error
+
+    try:
+        result = post_message(token, channel, text)
+    except (urllib.error.URLError, TimeoutError) as exc:
+        # Clean failure, no traceback — callers (cron agents) must see a plain error
+        # they can report, never a stack dump they might swallow.
+        print(f"ERROR: could not reach Slack: {exc}", file=sys.stderr)
+        return 1
     if not result.get("ok"):
         print(f"ERROR: Slack API refused the post: {result.get('error')} "
               f"(channel {channel} — is the bot invited to it?)", file=sys.stderr)

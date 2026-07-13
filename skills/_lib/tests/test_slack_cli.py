@@ -78,3 +78,18 @@ def test_ace_prefixed_token_wins(tmp_path, monkeypatch):
                                    encoding="utf-8")
     rc, calls = run(tmp_path, monkeypatch, ["post", "--text", "hi"])
     assert rc == 0 and calls["token"] == "xoxb-ace"
+
+
+def test_network_failure_is_clean_not_a_traceback(tmp_path, monkeypatch, capsys):
+    import urllib.error
+
+    make_profile(tmp_path)
+
+    def boom(token, channel, text):
+        raise urllib.error.URLError("connection reset")
+
+    monkeypatch.setattr(slack_cli, "post_message", boom)
+    monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "ace"))
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    assert slack_cli.main(["post", "--text", "hi"]) == 1     # rc 1, no exception escapes
+    assert "could not reach Slack" in capsys.readouterr().err

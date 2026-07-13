@@ -398,3 +398,31 @@ def test_reset_row_gets_reonboarded_with_fresh_thread(tmp_path, monkeypatch):
     assert row["onboarding_state"] == "collecting"
     assert row["thread_id"] == "7001"                                    # fresh thread
     assert ("/channels/7000", {"archived": True, "locked": False}, "PATCH") in fakes.writes
+
+
+def test_collecting_stuck_creator_still_gets_timers():
+    """Someone who never replies to the welcome must not fall through the timer gap:
+    nudge runs from joined_at, escalation covers 'collecting' too."""
+    rows = [
+        {"handle": "@ghost", "onboarding_state": "collecting", "joined_at": ts_ago(hours=49),
+         "guided_at": None, "nudged_at": None},
+        {"handle": "@fresh", "onboarding_state": "collecting", "joined_at": ts_ago(hours=1),
+         "guided_at": None, "nudged_at": None},
+    ]
+    assert [r["handle"] for r in tick.due_nudges(rows, NOW, timedelta(hours=48))] == ["@ghost"]
+    rows[0]["joined_at"] = ts_ago(days=8)
+    assert [r["handle"] for r in tick.due_escalations(rows, NOW, timedelta(days=7))] == ["@ghost"]
+
+
+def test_nudge_wake_payload_carries_stage(tmp_path, monkeypatch):
+    make_profile(tmp_path)                                   # test_mode: nudge at 3 min
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at)"
+                 " VALUES ('@ghost','collecting','77','7001',?)", (ts_ago(minutes=5),))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "ghost"}, "roles": []}])
+    out = run_tick(tmp_path, monkeypatch, fakes)
+    payload = json.loads(out)["onboarding_nudges_due"][0]
+    assert payload["stage"] == "collecting"                  # agent tailors: "finish your setup"
+    assert db_row(tmp_path, "@ghost")["onboarding_state"] == "nudged"

@@ -69,8 +69,12 @@ Check where they are first: `python ${HERMES_SKILL_DIR}/scripts/onboarding.py st
 ## Nudge mode (woken by the tick with `onboarding_nudges_due`)
 
 For each entry: write ONE friendly, low-pressure line in the brand voice pointing at a single
-concrete next step — prefer the live campaign/challenge (`get-campaigns`), else "come say hi"
-in the community channel. No guilt-tripping. Deliver per `nudge_via`:
+concrete next step. Pick it by `stage`:
+- `stage: collecting` — they never replied to the welcome: point them back to their setup
+  thread (`<#thread_id>`), e.g. "your 1-minute setup is waiting whenever you're ready".
+- `stage: guided` — they finished setup but went quiet: prefer the live campaign/challenge
+  (`get-campaigns`), else "come say hi" in the community channel.
+No guilt-tripping. Deliver per `nudge_via`:
 - `dm` (default): `python ${HERMES_SKILL_DIR}/scripts/send_dm.py --user-id <discord_id> --text "<nudge>"`
   — if the DM fails (user blocks server DMs), fall back to posting in their `thread_id` via
   `${HERMES_SKILL_DIR}/../sweep-unanswered/scripts/reply.py --channel-id <thread_id>`.
