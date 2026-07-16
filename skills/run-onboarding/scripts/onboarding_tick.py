@@ -73,6 +73,11 @@ DEFAULT_WELCOME = (
     "let's get you set up in under a minute.\n\n"
     "**First up: what's your TikTok username?** (just reply here)"
 )
+DEFAULT_WELCOME_BACK = (
+    "Hey {mention} — welcome back to {brand}! 🎉\n\n"
+    "I'm Ace. Leaving the server cleared your access, so let's get you set back up — "
+    "it only takes a moment. **Just reply here and I'll take care of the rest.**"
+)
 
 
 # ── HTTP helpers ───────────────────────────────────────────────────────────────
@@ -304,12 +309,13 @@ def onboard_new_member(conn, token: str, member: dict, cfg: dict, now: datetime)
     user = member["user"]
     handle = f"@{user['username']}"
     channel_id = cfg["channel_id"]
-    # Re-onboarding (team reset / rejoin-after-reset): the old private thread is dead
-    # weight — leaving the server revoked their access to it. Archive it, start fresh.
+    # Re-onboarding (rejoin / team reset): the old private thread is dead weight —
+    # leaving the server revoked their access to it. Archive it, start fresh.
     old = conn.execute(
-        "SELECT thread_id FROM creators WHERE handle = ? OR discord_id = ?",
+        "SELECT thread_id, tiktok FROM creators WHERE handle = ? OR discord_id = ?",
         (handle, user["id"]),
     ).fetchone()
+    returning = bool(old and old["tiktok"])  # we already know them → welcome-back variant
     if old and old["thread_id"]:
         archive_thread(token, old["thread_id"])
     thread = discord(token, f"/channels/{channel_id}/threads", {
@@ -319,17 +325,24 @@ def onboard_new_member(conn, token: str, member: dict, cfg: dict, now: datetime)
         "auto_archive_duration": 10080,  # a week of inactivity before Discord auto-hides it
     })
     discord(token, f"/channels/{thread['id']}/thread-members/{user['id']}", {}, method="PUT")
-    welcome = (cfg.get("welcome_message") or DEFAULT_WELCOME).format(
+    template = DEFAULT_WELCOME_BACK if returning else (cfg.get("welcome_message") or DEFAULT_WELCOME)
+    welcome = template.format(
         mention=f"<@{user['id']}>", brand=cfg.get("brand_name") or "the brand")
     discord(token, f"/channels/{thread['id']}/messages", {
         "content": welcome, "allowed_mentions": {"parse": ["users"]},
     })
+    # Fresh lifecycle, remembered identity: timers/retries/escalation reset so every
+    # window starts over, but tiktok/email survive — a returning creator who already
+    # gave them gets fast-tracked to role assignment instead of being re-interrogated.
     conn.execute(
         """INSERT INTO creators (handle, onboarding_state, joined_at, discord_id, thread_id)
            VALUES (?, 'collecting', ?, ?, ?)
            ON CONFLICT(handle) DO UPDATE SET
              onboarding_state='collecting', discord_id=excluded.discord_id,
-             thread_id=excluded.thread_id, joined_at=excluded.joined_at""",
+             thread_id=excluded.thread_id, joined_at=excluded.joined_at,
+             retries=0, guided_at=NULL, nudged_at=NULL, escalated_at=NULL,
+             escalation_channel=NULL, escalation_ts=NULL, resolved_at=NULL,
+             last_active_at=NULL""",
         (handle, str(now.timestamp()), user["id"], str(thread["id"])),
     )
     conn.commit()
@@ -406,11 +419,15 @@ def main(argv: list[str] | None = None) -> int:
         # 1+2. member sync: joins + leavers
         members = list_all_members(token, guild_id)
         member_ids = {m["user"]["id"] for m in members if m.get("user")}
-        # state='new' means "re-onboard me" (the team's reset command sets it) — those
-        # rows are deliberately NOT known, so the member sync picks them up again.
+        # Not "known" (so the member sync re-onboards them when present):
+        #   'new'  — the team's reset command ("re-onboard me")
+        #   'left' — they left the server; being in the member list again means they
+        #            REJOINED, and rejoins auto-restart onboarding (Discord stripped
+        #            their roles on the way out, so they need the flow again anyway).
+        # Everyone else present is either mid-flow, done, or an open case — untouched.
         known = {r["discord_id"] for r in conn.execute(
             "SELECT discord_id FROM creators WHERE discord_id IS NOT NULL"
-            " AND onboarding_state != 'new'")}
+            " AND onboarding_state NOT IN ('new', 'left')")}
         if not state.get("member_baseline_done"):
             # First enabled tick: existing members were onboarded by Vaulty — record, don't re-run.
             for m in members:
@@ -430,16 +447,21 @@ def main(argv: list[str] | None = None) -> int:
             for m in members:
                 if is_new_joiner(m, known, team_role_id):
                     onboard_new_member(conn, token, m, {**cfg, "channel_id": channel_id}, now)
-            in_flow = conn.execute(
+            # Leavers: ANY tracked state moves to 'left' (timers stop, thread archived) —
+            # including escalated/resolved/active, so a later REJOIN auto-restarts the
+            # flow. Only Vaulty-era pre_existing members are never touched.
+            tracked = conn.execute(
                 """SELECT * FROM creators WHERE discord_id IS NOT NULL
-                   AND onboarding_state IN ('collecting','complete','guided','nudged','flagged')"""
+                   AND onboarding_state IN ('collecting','complete','guided','nudged',
+                                            'flagged','escalated','resolved','active')"""
             ).fetchall()
-            for r in in_flow:
+            for r in tracked:
                 if r["discord_id"] not in member_ids:
                     upd(conn, r["handle"], onboarding_state="left")
                     if r["thread_id"]:
                         archive_thread(token, r["thread_id"])
-                    print(f"onboarding: {r['handle']} left mid-flow — timers stopped.", file=sys.stderr)
+                    print(f"onboarding: {r['handle']} left ({r['onboarding_state']}) — "
+                          "timers stopped; a rejoin restarts the flow.", file=sys.stderr)
 
         if args.joins_only:
             print(SILENT)  # joins/leavers handled; everything else belongs to the cron run

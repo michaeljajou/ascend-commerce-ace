@@ -426,3 +426,52 @@ def test_nudge_wake_payload_carries_stage(tmp_path, monkeypatch):
     payload = json.loads(out)["onboarding_nudges_due"][0]
     assert payload["stage"] == "collecting"                  # agent tailors: "finish your setup"
     assert db_row(tmp_path, "@ghost")["onboarding_state"] == "nudged"
+
+
+def test_rejoin_after_leaving_restarts_automatically(tmp_path, monkeypatch):
+    """left → present in the member list again = rejoin → fresh thread, welcome-back,
+    timers reset, but tiktok/email remembered (fast-track)."""
+    make_profile(tmp_path)
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, tiktok,"
+                 " email, nudged_at, escalated_at, joined_at)"
+                 " VALUES ('@boomerang','left','77','7000','boom.tt','b@x.com',?,?,?)",
+                 (ts_ago(days=2), ts_ago(days=1), ts_ago(days=3)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "boomerang"}, "roles": []}])
+    run_tick(tmp_path, monkeypatch, fakes)
+    row = db_row(tmp_path, "@boomerang")
+    assert row["onboarding_state"] == "collecting" and row["thread_id"] == "7001"
+    assert row["nudged_at"] is None and row["escalated_at"] is None    # timers fully reset
+    assert row["tiktok"] == "boom.tt" and row["email"] == "b@x.com"    # identity remembered
+    welcome = next(pl for p, pl, _ in fakes.writes if p == "/channels/7001/messages")
+    assert "welcome back" in welcome["content"].lower()                # returning variant
+    assert ("/channels/7000", {"archived": True, "locked": False}, "PATCH") in fakes.writes
+
+
+def test_escalated_member_still_present_is_not_reonboarded(tmp_path, monkeypatch):
+    """An open escalated case for someone who never left must stay untouched."""
+    make_profile(tmp_path)
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at)"
+                 " VALUES ('@ignored','escalated','77','7000',?)", (ts_ago(days=2),))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "ignored"}, "roles": []}])
+    run_tick(tmp_path, monkeypatch, fakes)
+    assert db_row(tmp_path, "@ignored")["onboarding_state"] == "escalated"
+    assert not any(p.endswith("/threads") for p, _, _ in fakes.writes)
+
+
+def test_escalated_leaver_moves_to_left(tmp_path, monkeypatch):
+    make_profile(tmp_path)
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at)"
+                 " VALUES ('@quitcase','escalated','88','7005',?)", (ts_ago(days=2),))
+    conn.commit()
+    fakes = FakeAPIs(members=[])                                       # they left
+    run_tick(tmp_path, monkeypatch, fakes)
+    assert db_row(tmp_path, "@quitcase")["onboarding_state"] == "left"
+    assert ("/channels/7005", {"archived": True, "locked": False}, "PATCH") in fakes.writes

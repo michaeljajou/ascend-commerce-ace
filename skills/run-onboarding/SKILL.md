@@ -95,6 +95,9 @@ End your turn with only `[SILENT]`.
   budget, not per-field.
 - Never re-run the full flow for someone whose `status` is already `guided`/`active` — answer
   whatever they asked instead (a duplicate join resumes, never restarts).
+- **Rejoins restart automatically**: anyone who left the server and comes back gets a fresh
+  thread + welcome-back from the tick, with timers reset but their TikTok/email remembered —
+  if `status` shows those already set, skip straight to role assignment and guidance.
 - Escalations (7-day quiet) are the tick's job, not yours — don't nudge anyone twice.
 - Don't dump every channel in guidance; three or four that matter beat eleven.
 
