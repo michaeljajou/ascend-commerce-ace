@@ -30,10 +30,20 @@ def test_full_onboarding_flow(conn):
     assert c.last_active_at == "200.0"
 
 
-def test_complete_requires_tiktok_and_email(conn):
+def test_complete_requires_only_tiktok(conn):
     onboarding.start(conn, "@bo", now=100.0)
     with pytest.raises(ValueError):
-        onboarding.complete(conn, "@bo")
+        onboarding.complete(conn, "@bo")                      # no tiktok yet → blocked
+    onboarding.set_fields(conn, "@bo", tiktok="bo.tt")
+    out = onboarding.complete(conn, "@bo")                    # email/phone skipped → fine
+    assert out["state"] == onboarding.COMPLETE
+
+
+def test_phone_is_saved_and_optional(conn):
+    onboarding.start(conn, "@po", now=100.0)
+    out = onboarding.set_fields(conn, "@po", tiktok="po.tt", phone="+1 555 010 0100")
+    assert out["phone"] == "+1 555 010 0100"
+    assert onboarding.status(conn, "@po")["phone"] == "+1 555 010 0100"
 
 
 def test_complete_unknown_creator_raises(conn):

@@ -113,6 +113,7 @@ ONBOARDING_MIGRATIONS = [
     "ALTER TABLE creators ADD COLUMN escalation_channel TEXT", # Slack channel id of the post
     "ALTER TABLE creators ADD COLUMN escalation_ts TEXT",      # Slack message ts (✅ resolve poll)
     "ALTER TABLE creators ADD COLUMN resolved_at TEXT",
+    "ALTER TABLE creators ADD COLUMN phone TEXT",              # optional WhatsApp/phone
 ]
 
 

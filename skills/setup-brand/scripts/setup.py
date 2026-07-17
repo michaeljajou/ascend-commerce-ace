@@ -315,19 +315,33 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path") ->
         "idle_minutes": 60,
     }
 
+    # Tools a creator-facing brand agent must never surface (each earned its place in QA):
+    #   terminal   — shell access (security)
+    #   clarify    — emits "Hermes needs your input" prompts into the creator's chat
+    #   cronjob    — a flailing agent once self-scheduled jobs whose output spammed a thread
+    #   delegation — subagent spawning turns a 20s reply into a 6-minute one
+    _STRIP_TOOLSETS = {
+        "discord": {"terminal", "clarify", "cronjob", "delegation"},
+        "cli": {"terminal", "clarify"},
+    }
     platform_toolsets = existing.setdefault("platform_toolsets", {})
-    for platform in ("discord", "cli"):
+    for platform, banned in _STRIP_TOOLSETS.items():
         current = platform_toolsets.get(platform)
         if not isinstance(current, list):
             # Hermes' own profile defaults populate this on `hermes profile create`;
             # if it's somehow missing, don't invent a full toolset list here — just
-            # ensure 'terminal' can never sneak back in on the next line.
+            # ensure the banned tools can never sneak back in on the next line.
             current = []
-        platform_toolsets[platform] = [t for t in current if t != "terminal"]
+        platform_toolsets[platform] = [t for t in current if t not in banned]
 
+    # Zero operational chatter in creator-facing chat: no tool progress, no mid-turn
+    # notes, no file-verifier output, no turn explainers, no credits notices.
     display = existing.setdefault("display", {})
     display["tool_progress"] = "off"
     display["interim_assistant_messages"] = False
+    display["file_mutation_verifier"] = False
+    display["turn_completion_explainer"] = False
+    display["credits_notices"] = False
 
     # Ascend operates on US Eastern: cron schedules ("0 9 * * *" = 9 AM), log timestamps,
     # and prompt time injection all follow this. IANA zone → DST handled by Hermes.

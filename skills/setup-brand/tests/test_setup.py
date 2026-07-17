@@ -267,3 +267,21 @@ def test_merge_config_preserves_onboarding_channel_id(tmp_path):
     cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
     setup.merge_config(cfg, make_spec())                     # spec-driven re-run
     assert yaml.safe_load(cfg.read_text())["ace"]["onboarding"]["channel_id"] == "900"
+
+
+def test_merge_config_strips_noisy_tools_and_chatter(tmp_path):
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"platform_toolsets": {
+        "discord": ["web", "terminal", "clarify", "cronjob", "delegation", "skills"],
+        "cli": ["web", "terminal", "clarify", "cronjob"],
+    }}), encoding="utf-8")
+    setup.merge_config(cfg, make_spec())
+    data = yaml.safe_load(cfg.read_text())
+    assert data["platform_toolsets"]["discord"] == ["web", "skills"]   # all four stripped
+    assert data["platform_toolsets"]["cli"] == ["web", "cronjob"]      # cli keeps cronjob
+    display = data["display"]
+    assert display["file_mutation_verifier"] is False
+    assert display["turn_completion_explainer"] is False
+    assert display["credits_notices"] is False

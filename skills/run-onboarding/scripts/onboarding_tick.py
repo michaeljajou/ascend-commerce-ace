@@ -65,6 +65,7 @@ MIGRATIONS = [
     "ALTER TABLE creators ADD COLUMN escalation_channel TEXT",
     "ALTER TABLE creators ADD COLUMN escalation_ts TEXT",
     "ALTER TABLE creators ADD COLUMN resolved_at TEXT",
+    "ALTER TABLE creators ADD COLUMN phone TEXT",
 ]
 
 DEFAULT_WELCOME = (
@@ -77,6 +78,13 @@ DEFAULT_WELCOME_BACK = (
     "Hey {mention} — welcome back to {brand}! 🎉\n\n"
     "I'm Ace. Leaving the server cleared your access, so let's get you set back up — "
     "it only takes a moment. **Just reply here and I'll take care of the rest.**"
+)
+# The setup-reminder DM (creator never replied to the welcome). FIXED copy, sent by
+# this script directly — zero tokens, and the wording can never drift.
+NUDGE_DM = (
+    "Hey! Just a friendly reminder to complete the onboarding steps to join the {brand} "
+    "discord community! It takes 1 minute and the thread is waiting for you here: {link}. "
+    "Excited to have you in the community!"
 )
 
 
@@ -349,6 +357,17 @@ def onboard_new_member(conn, token: str, member: dict, cfg: dict, now: datetime)
     print(f"onboarding: started {handle} (thread {thread['id']})", file=sys.stderr)
 
 
+def send_dm(token: str, user_id: str, text: str) -> bool:
+    try:
+        dm = discord(token, "/users/@me/channels", {"recipient_id": user_id})
+        discord(token, f"/channels/{dm['id']}/messages", {"content": text})
+        return True
+    except urllib.error.HTTPError as exc:
+        print(f"onboarding: DM to {user_id} failed ({exc.code}) — falling back to thread.",
+              file=sys.stderr)
+        return False
+
+
 def archive_thread(token: str, thread_id: str) -> None:
     try:
         discord(token, f"/channels/{thread_id}", {"archived": True, "locked": False}, method="PATCH")
@@ -503,12 +522,23 @@ def main(argv: list[str] | None = None) -> int:
             "('collecting','guided','nudged','escalated')"
         )]
 
-        # 4a. nudges → wake the agent (brand-voice DM); mark on emit (at-most-once)
+        # 4a. nudges — mark on emit (at-most-once):
+        #   collecting (never replied to the welcome): FIXED reminder copy → this script
+        #   DMs it directly, zero tokens. guided (finished setup, went quiet): the agent
+        #   composes a campaign-flavored nudge in the brand voice → wake it.
         for r in due_nudges(rows, now, nudge_window):
             upd(conn, r["handle"], onboarding_state="nudged", nudged_at=str(now.timestamp()))
+            if r["onboarding_state"] == "collecting":
+                link = f"https://discord.com/channels/{guild_id}/{r['thread_id']}"
+                text = NUDGE_DM.format(brand=cfg["brand_name"], link=link)
+                if not send_dm(token, r["discord_id"], text) and r["thread_id"]:
+                    discord(token, f"/channels/{r['thread_id']}/messages", {
+                        "content": text.replace(f" here: {link}", " right here"),
+                        "allowed_mentions": {"parse": ["users"]}})
+                continue
             wake.append({"handle": r["handle"], "discord_id": r["discord_id"],
                          "thread_id": r["thread_id"], "nudge_via": ob.get("nudge_via", "dm"),
-                         "stage": r["onboarding_state"]})  # collecting = never replied to welcome
+                         "stage": r["onboarding_state"]})
 
         # 4b. escalations → pure-script Slack post, zero tokens
         # (ACE_ prefix: a bare SLACK_BOT_TOKEN makes the gateway retry a Slack platform forever)

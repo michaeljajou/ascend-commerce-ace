@@ -45,13 +45,18 @@ def start(conn, handle: str, now: float | None = None) -> dict:
     return {"handle": handle, "state": COLLECTING}
 
 
-def set_fields(conn, handle: str, tiktok: str | None = None, email: str | None = None) -> dict:
+def set_fields(conn, handle: str, tiktok: str | None = None, email: str | None = None,
+               phone: str | None = None) -> dict:
     existing = store.get_creator(conn, handle) or Creator(handle=handle, onboarding_state=COLLECTING)
     existing.tiktok = tiktok or existing.tiktok
     existing.email = email or existing.email
     existing.onboarding_state = COLLECTING
     store.upsert_creator(conn, existing)
-    return {"handle": handle, "tiktok": existing.tiktok, "email": existing.email}
+    if phone:
+        store.update_onboarding(conn, handle, phone=phone)
+    row = store.get_onboarding(conn, handle) or {}
+    return {"handle": handle, "tiktok": existing.tiktok, "email": existing.email,
+            "phone": row.get("phone")}
 
 
 def retry(conn, handle: str) -> dict:
@@ -68,8 +73,9 @@ def complete(conn, handle: str, role: str = "Creator", now: float | None = None)
     c = store.get_creator(conn, handle)
     if c is None:
         raise ValueError(f"unknown creator {handle!r}; run start first")
-    if not (c.tiktok and c.email):
-        raise ValueError("cannot complete onboarding without both tiktok and email")
+    if not c.tiktok:
+        raise ValueError("cannot complete onboarding without a tiktok username")
+    # email and phone are OPTIONAL — creators may say "skip" for either
     c.role = role
     c.onboarding_state = COMPLETE
     store.upsert_creator(conn, c)
@@ -98,7 +104,7 @@ def status(conn, handle: str) -> dict:
     if row is None:
         return {"handle": handle, "state": None, "error": "not found"}
     return {k: row.get(k) for k in (
-        "handle", "onboarding_state", "tiktok", "email", "role", "retries",
+        "handle", "onboarding_state", "tiktok", "email", "phone", "role", "retries",
         "joined_at", "guided_at", "nudged_at", "escalated_at", "resolved_at",
         "last_active_at", "thread_id",
     )}
@@ -148,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         if name == "set":
             p.add_argument("--tiktok")
             p.add_argument("--email")
+            p.add_argument("--phone")
         if name == "complete":
             p.add_argument("--role", default="Creator")
     tm = sub.add_parser("test-mode")
@@ -163,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     conn = store.connect()
     handlers = {
         "start": lambda: start(conn, args.handle),
-        "set": lambda: set_fields(conn, args.handle, args.tiktok, args.email),
+        "set": lambda: set_fields(conn, args.handle, args.tiktok, args.email, args.phone),
         "retry": lambda: retry(conn, args.handle),
         "complete": lambda: complete(conn, args.handle, args.role),
         "guided": lambda: guided(conn, args.handle),

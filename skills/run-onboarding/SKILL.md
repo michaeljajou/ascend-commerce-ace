@@ -29,12 +29,19 @@ tell whoever asked that onboarding is currently disabled.
 `welcome-<username>`, so thread `welcome-jane77` → handle `@jane77`. Never use their display
 name — display names don't match the store record and create phantom rows.
 
-Check where they are first: `python ${HERMES_SKILL_DIR}/scripts/onboarding.py status --handle "@<username>"`
+**Pacing — the #1 rule: ONE short message per turn.** A sentence or two plus a single
+question. Never several messages in a row, never walls of text, never bullet-dumps while
+collecting info. Run at most the one or two scripts a step needs, then answer — a fast short
+reply beats a thorough slow one. You should NOT need `status` on every message: the thread is
+your conversation history; run `status` only on your first turn in a thread or when unsure.
+
+Check where they are first (first turn only): `python ${HERMES_SKILL_DIR}/scripts/onboarding.py status --handle "@<username>"`
 (if there's no record yet, `start` one). Then continue from the first missing piece:
 
-1. **TikTok username.** Valid: a plausible TikTok handle (1–24 chars; letters, digits, `_`, `.`;
-   with or without a leading @; also accept a tiktok.com profile URL and extract the handle).
-   Invalid (blank, "idk", an email, obvious junk) → count it and re-ask with a clarifying prompt:
+1. **TikTok username** (required). Valid: a plausible TikTok handle (1–24 chars; letters,
+   digits, `_`, `.`; with or without a leading @; also accept a tiktok.com profile URL and
+   extract the handle). Invalid (blank, "idk", an email, obvious junk) → count it and re-ask
+   with a clarifying prompt:
    ```
    python ${HERMES_SKILL_DIR}/scripts/onboarding.py retry --handle "@<username>"
    ```
@@ -42,10 +49,17 @@ Check where they are first: `python ${HERMES_SKILL_DIR}/scripts/onboarding.py st
    (`onboarding.py flag`), post to the team Slack via `_lib/slack_cli.py` (who, which field,
    what they said), and tell the creator warmly that a team member will take it from here.
    Valid → save: `onboarding.py set --handle "@<username>" --tiktok "<handle>"`
-2. **Email.** Same retry-then-flag logic. Valid = normal email shape.
+2. **Email** (OPTIONAL). Ask like: "What's the best email to reach you? If you prefer not to
+   share, just say \"skip\"." — "skip" (or any clear decline) moves straight on, no pushback.
+   A real answer must look like an email; junk → same retry logic.
    Valid → save: `onboarding.py set --handle "@<username>" --email "<email>"`
-3. **Role assignment** (both fields collected). `assign_role.py` assigns every role in
-   `ace.onboarding.creator_roles` (default: `onboarded` + `creator` — Vaulty parity):
+3. **WhatsApp / phone number** (OPTIONAL). Ask like: "Last one — what's your WhatsApp or
+   phone number? If you prefer not to share, just say \"skip\"." Same skip rule. A real
+   answer should look like a phone number (digits, spaces, +, dashes).
+   Valid → save: `onboarding.py set --handle "@<username>" --phone "<number>"`
+4. **Role assignment** (TikTok collected; email/phone may be skipped). `assign_role.py`
+   assigns every role in `ace.onboarding.creator_roles` (default: `onboarded` + `creator` —
+   Vaulty parity):
    ```
    python ${HERMES_SKILL_DIR}/scripts/assign_role.py --user-id <discord_id>
    python ${HERMES_SKILL_DIR}/scripts/onboarding.py complete --handle "@<username>" --role creator
@@ -53,14 +67,16 @@ Check where they are first: `python ${HERMES_SKILL_DIR}/scripts/onboarding.py st
    If `assign_role.py` exits non-zero: **never fail silently** — this blocks their channel
    access. Tell the creator the team's been looped in to finish their access, AND post the
    script's error to Slack (`slack_cli.py`) immediately. Do not mark complete.
-4. **Guidance sequence** — one friendly message (or two short ones), in the brand voice, covering
-   in order:
+5. **Guidance sequence** — ONE friendly message, in the brand voice, covering in order:
    1. What the key channels are for (use clickable `<#id>` tags from the SOUL Channel directory;
       just the few that matter to someone brand new).
    2. How to request samples / join campaigns — ground in `get-knowledge` (samples section).
    3. **What's actually running right now** — ground in `get-campaigns` (never boilerplate).
    4. How to get help: ask Ace in the community channel, or the team for anything creative.
    5. A nudge to introduce themselves in the community channel.
+   **The community home is `#community-chat`** (clickable tag from the Channel directory) —
+   every "come hang out / say hi / ask questions" pointer goes THERE. Never point creators
+   to `#general` unless the brand's config explicitly says otherwise.
    Then stamp it — the 48h clock starts here:
    ```
    python ${HERMES_SKILL_DIR}/scripts/onboarding.py guided --handle "@<username>"
@@ -68,12 +84,10 @@ Check where they are first: `python ${HERMES_SKILL_DIR}/scripts/onboarding.py st
 
 ## Nudge mode (woken by the tick with `onboarding_nudges_due`)
 
-For each entry: write ONE friendly, low-pressure line in the brand voice pointing at a single
-concrete next step. Pick it by `stage`:
-- `stage: collecting` — they never replied to the welcome: point them back to their setup
-  thread (`<#thread_id>`), e.g. "your 1-minute setup is waiting whenever you're ready".
-- `stage: guided` — they finished setup but went quiet: prefer the live campaign/challenge
-  (`get-campaigns`), else "come say hi" in the community channel.
+Only `stage: guided` creators arrive here (setup-reminder nudges for people who never replied
+are fixed copy the tick DMs itself). For each entry: write ONE friendly, low-pressure line in
+the brand voice pointing at a single concrete next step — prefer the live campaign/challenge
+(`get-campaigns`), else "come say hi" in `#community-chat`.
 No guilt-tripping. Deliver per `nudge_via`:
 - `dm` (default): `python ${HERMES_SKILL_DIR}/scripts/send_dm.py --user-id <discord_id> --text "<nudge>"`
   — if the DM fails (user blocks server DMs), fall back to posting in their `thread_id` via
@@ -90,9 +104,10 @@ End your turn with only `[SILENT]`.
 - Keep turns short — one question or one step per message. No status chatter, no walls of text.
 - The tick already marked them nudged when it woke you — deliver every nudge you were handed;
   if delivery fails both ways, post the failure to Slack instead of dropping it.
-- `complete` fails without BOTH TikTok and email — that's the guard, not an error to work around.
-- Retries are per-creator and cumulative across both fields — the limit is a total patience
-  budget, not per-field.
+- `complete` fails without a TikTok username — that's the guard, not an error to work around.
+  Email and phone are optional ("skip" is a first-class answer, never argued with).
+- Retries are per-creator and cumulative across all fields — the limit is a total patience
+  budget, not per-field. A "skip" is NOT a retry.
 - Never re-run the full flow for someone whose `status` is already `guided`/`active` — answer
   whatever they asked instead (a duplicate join resumes, never restarts).
 - **Rejoins restart automatically**: anyone who left the server and comes back gets a fresh

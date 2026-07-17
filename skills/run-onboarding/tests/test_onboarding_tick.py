@@ -103,6 +103,8 @@ class FakeAPIs:
             if path.endswith("/threads"):
                 self.thread_seq += 1
                 return {"id": str(self.thread_seq)}
+            if path == "/users/@me/channels":
+                return {"id": "dm-" + payload["recipient_id"]}
             return {}
         if "/guilds/g1/members?" in path:
             return self.members if "after=0" in path else []
@@ -414,7 +416,9 @@ def test_collecting_stuck_creator_still_gets_timers():
     assert [r["handle"] for r in tick.due_escalations(rows, NOW, timedelta(days=7))] == ["@ghost"]
 
 
-def test_nudge_wake_payload_carries_stage(tmp_path, monkeypatch):
+def test_collecting_nudge_is_a_deterministic_dm(tmp_path, monkeypatch):
+    """Never-replied creators get the FIXED reminder copy DM'd by the script itself —
+    zero tokens, exact wording, thread link included. The agent is not woken."""
     make_profile(tmp_path)                                   # test_mode: nudge at 3 min
     seed_state(tmp_path)
     conn = tick.open_db(tmp_path)
@@ -423,9 +427,13 @@ def test_nudge_wake_payload_carries_stage(tmp_path, monkeypatch):
     conn.commit()
     fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "ghost"}, "roles": []}])
     out = run_tick(tmp_path, monkeypatch, fakes)
-    payload = json.loads(out)["onboarding_nudges_due"][0]
-    assert payload["stage"] == "collecting"                  # agent tailors: "finish your setup"
+    assert json.loads(out) == {"wakeAgent": False}           # no agent, no tokens
     assert db_row(tmp_path, "@ghost")["onboarding_state"] == "nudged"
+    assert ("/users/@me/channels", {"recipient_id": "77"}, None) in fakes.writes
+    dm = next(pl for p, pl, _ in fakes.writes if p.startswith("/channels/") and
+              pl and "friendly reminder" in (pl.get("content") or ""))
+    assert "join the Pilot discord community" in dm["content"]
+    assert "https://discord.com/channels/g1/7001" in dm["content"]   # link to their thread
 
 
 def test_rejoin_after_leaving_restarts_automatically(tmp_path, monkeypatch):
