@@ -68,8 +68,9 @@ Check where they are first (first turn only): `python ${HERMES_SKILL_DIR}/script
    access (with the access gate on, those roles ARE their key to the server). Tell the
    creator the team's been looped in to finish their access, AND post the script's error to
    Slack (`slack_cli.py`) immediately. Do not mark complete.
-   `complete` also pushes their record to the team's Google Sheet automatically — nothing
-   for you to do, and a sheet outage is logged without blocking the creator.
+   `complete` also posts their captured details (TikTok + contact) to the team's
+   **#ace-onboarding** Slack channel automatically — nothing for you to do, and a Slack
+   outage is reported without blocking the creator.
 5. **Guidance sequence** — ONE friendly message, in the brand voice, covering in order:
    1. What the key channels are for (use clickable `<#id>` tags from the SOUL Channel directory;
       just the few that matter to someone brand new).

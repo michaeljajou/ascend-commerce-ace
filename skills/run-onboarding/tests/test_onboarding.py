@@ -118,3 +118,47 @@ def test_test_mode_toggle(tmp_path):
     assert cfg["ace"]["brand_id"] == "x"      # rest of config untouched
     onboarding.set_test_mode(tmp_path, False)
     assert yaml.safe_load((tmp_path / "config.yaml").read_text())["ace"]["onboarding"]["test_mode"] is False
+
+
+def test_format_signup_shows_optional_gaps_explicitly():
+    """A blank cell is ambiguous; '_not shared_' tells the team it was skipped."""
+    text = onboarding.format_signup({
+        "handle": "@ava", "tiktok": "ava.tt", "email": None, "phone": None,
+        "discord_id": "77", "joined_at": "1784740716",
+    })
+    assert "New creator onboarded" in text and "@ava" in text
+    assert "*ava.tt*" in text
+    assert text.count("_not shared_") == 2          # email + phone
+    assert "discord.com/users/77" in text
+
+
+def test_complete_posts_to_slack_and_reports_it(conn, monkeypatch):
+    from _lib import sheet, slack_cli
+
+    posted = {}
+    monkeypatch.setattr(slack_cli, "main",
+                        lambda argv: posted.update(argv=argv) or 0)
+    monkeypatch.setattr(sheet, "brand_config", lambda profile=None: {"onboarding": {}})
+    monkeypatch.setattr(sheet, "sync_creator", lambda row, **kw: False)
+
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.set_fields(conn, "@ava", tiktok="ava.tt", phone="+1555")   # email skipped
+    out = onboarding.complete(conn, "@ava", now=200.0)
+    assert out["posted_to_slack"] is True
+    assert "--channel" in posted["argv"]
+    assert posted["argv"][posted["argv"].index("--channel") + 1] == "#ace-onboarding"
+    body = posted["argv"][-1]
+    assert "ava.tt" in body and "+1555" in body and "_not shared_" in body
+
+
+def test_slack_failure_never_blocks_completion(conn, monkeypatch):
+    from _lib import sheet, slack_cli
+
+    monkeypatch.setattr(slack_cli, "main", lambda argv: 1)       # Slack down
+    monkeypatch.setattr(sheet, "brand_config", lambda profile=None: {"onboarding": {}})
+    monkeypatch.setattr(sheet, "sync_creator", lambda row, **kw: False)
+    onboarding.start(conn, "@bo", now=100.0)
+    onboarding.set_fields(conn, "@bo", tiktok="bo.tt")
+    out = onboarding.complete(conn, "@bo", now=200.0)
+    assert out["state"] == onboarding.COMPLETE                   # creator is still done
+    assert out["posted_to_slack"] is False

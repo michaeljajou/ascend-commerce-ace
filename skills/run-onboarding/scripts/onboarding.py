@@ -38,6 +38,11 @@ from _lib.models import Creator  # noqa: E402
 
 NEW, COLLECTING, COMPLETE = "new", "collecting", "complete"
 
+# Where captured creator details land for the team (override per brand with
+# ace.onboarding.data_channel). Separate from #ace-escalations so signups stay
+# scannable and aren't buried among escalations.
+DATA_CHANNEL = "#ace-onboarding"
+
 
 def start(conn, handle: str, now: float | None = None) -> dict:
     now = now if now is not None else time.time()
@@ -80,12 +85,50 @@ def complete(conn, handle: str, role: str = "Creator", now: float | None = None)
     c.onboarding_state = COMPLETE
     store.upsert_creator(conn, c)
     store.mark_active(conn, handle, ts=now)
-    # Push the record to the team's Google Sheet automatically (no-op when the brand
-    # has no sheet_webhook). Deterministic, and a sheet outage never blocks a creator.
+    row = store.get_onboarding(conn, handle) or {}
+    # Hand the captured details to the team the moment they're captured. Both sinks are
+    # deterministic and best-effort: neither can block or fail a creator's onboarding.
     from _lib import sheet
 
-    synced = sheet.sync_creator(store.get_onboarding(conn, handle) or {})
-    return {"handle": handle, "state": COMPLETE, "role": role, "sheet_synced": synced}
+    return {
+        "handle": handle, "state": COMPLETE, "role": role,
+        "posted_to_slack": post_signup(row),                 # #ace-onboarding
+        "sheet_synced": sheet.sync_creator(row),             # no-op without a webhook
+    }
+
+
+def format_signup(row: dict) -> str:
+    """The team-facing new-creator card. Optional fields say so explicitly rather than
+    showing a blank, so nobody wonders whether it failed to capture."""
+    def shown(value: str | None) -> str:
+        return value if value else "_not shared_"
+
+    joined = row.get("joined_at")
+    when = ""
+    if joined:
+        from datetime import datetime, timezone
+
+        when = datetime.fromtimestamp(float(joined), tz=timezone.utc).strftime("%b %-d, %Y")
+    lines = [
+        f"✅ *New creator onboarded:* {row.get('handle') or '(unknown)'}",
+        f"• TikTok: *{shown(row.get('tiktok'))}*",
+        f"• Email: {shown(row.get('email'))}",
+        f"• WhatsApp/phone: {shown(row.get('phone'))}",
+    ]
+    if row.get("discord_id"):
+        lines.append(f"• Discord: <https://discord.com/users/{row['discord_id']}|profile>")
+    if when:
+        lines.append(f"• Joined: {when}")
+    return "\n".join(lines)
+
+
+def post_signup(row: dict) -> bool:
+    """Post the new-creator card to the brand's onboarding Slack channel."""
+    from _lib import sheet, slack_cli
+
+    ace = sheet.brand_config()
+    channel = (ace.get("onboarding") or {}).get("data_channel") or DATA_CHANNEL
+    return slack_cli.main(["post", "--channel", channel, "--text", format_signup(row)]) == 0
 
 
 def guided(conn, handle: str, now: float | None = None) -> dict:

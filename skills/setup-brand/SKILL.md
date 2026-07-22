@@ -41,10 +41,12 @@ marked *(portal)* live in the Discord **Developer Portal**; *(server)* items liv
    gateway try to run a Slack platform and retry-connect forever; brands are outbound-only).
 6. **Before enabling onboarding** (`ace.onboarding.enabled`): turn **Vaulty's join handling
    OFF** on that server — running both risks duplicate onboarding spaces and role conflicts.
-7. *(Sheets, optional but recommended)* Create the team's creator sheet: Extensions → Apps
-   Script, paste the `doPost` snippet from `_lib/sheet.py`, Deploy → Web app (execute as
-   you, access "Anyone"), and put the resulting URL in the spec as
-   `onboarding.sheet_webhook`. Completed onboardings then append themselves as rows.
+7. *(Slack)* Create **#ace-onboarding** and invite the bot (`/invite @<bot>`). Every
+   completed onboarding posts the creator's captured details there, brand-tagged. Kept
+   separate from #ace-escalations so signups stay scannable. Override per brand with
+   `onboarding.data_channel`. *(Optional extra: a Google Sheet mirror — paste the `doPost`
+   snippet from `_lib/sheet.py` into Apps Script, deploy as a Web app with access
+   "Anyone", and set `onboarding.sheet_webhook` to the deployment URL.)*
 8. *(Access gate)* To lock the server until onboarding is done — new members see ONLY the
    onboarding channel — run after step 3b:
    ```

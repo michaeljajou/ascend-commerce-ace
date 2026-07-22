@@ -182,6 +182,10 @@ def build_onboarding(spec: dict) -> dict:
         "test_mode": bool(ob.get("test_mode", False)),   # compressed timers for QA
         "test_nudge_minutes": ob.get("test_nudge_minutes", 3),
         "test_escalate_minutes": ob.get("test_escalate_minutes", 8),
+        # Captured creator details (TikTok + contact) are posted here on completion,
+        # brand-tagged. Kept separate from the escalation channel so signups stay
+        # scannable. All brands share it by default.
+        "data_channel": ob.get("data_channel") or "#ace-onboarding",
     }
     if ob.get("welcome_message"):
         block["welcome_message"] = ob["welcome_message"]
