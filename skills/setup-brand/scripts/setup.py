@@ -273,6 +273,11 @@ BRAND_DISCORD_TOOLSET = ["code_execution", "file", "vision"]
 # _apply_security_defaults for why this is a floor as well as a ceiling.
 BRAND_MAX_TURNS = 12
 
+# Per-model-call limits. Hermes' defaults (1800s request, 90s to first byte) suit a batch
+# job with a human watching a terminal; a creator waiting in a Discord thread does not.
+BRAND_REQUEST_TIMEOUT_SECONDS = 90     # hard ceiling on ONE model call
+BRAND_STALE_TIMEOUT_SECONDS = 30       # time-to-first-byte before the call is abandoned
+
 # Security hardening baseline applied to EVERY brand profile. These are forced
 # (not setdefault) because they are the security posture, not a per-brand style
 # choice — an operator who wants to loosen one after setup can hand-edit
@@ -287,7 +292,22 @@ _SECURITY_COMMAND_ALLOWLIST_TEMPLATE = [
 ]
 
 
-def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path") -> None:
+def _provider_id(existing: dict) -> str:
+    """Which provider this brand's model talks to, for the per-provider timeout knobs.
+
+    Hermes writes `model:` as a dict ({default, provider, base_url, api_mode}); a spec that
+    pins a model may leave it a bare string. Fall back to whichever provider the config
+    already configures, then to OpenRouter (every brand to date).
+    """
+    model_cfg = existing.get("model")
+    if isinstance(model_cfg, dict) and model_cfg.get("provider"):
+        return str(model_cfg["provider"])
+    configured = [k for k in (existing.get("providers") or {}) if k]
+    return str(configured[0]) if len(configured) == 1 else "openrouter"
+
+
+def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path",
+                             provider_id: str = "openrouter") -> None:
     """Force the validated security baseline onto a brand's config.yaml.
 
     Rationale (validated on test-brand, see SETUP_BRAND security incident notes):
@@ -390,6 +410,15 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path") ->
     agent_cfg = existing.setdefault("agent", {})
     agent_cfg["max_turns"] = BRAND_MAX_TURNS
 
+    # The other half of the latency ceiling: max_turns bounds how MANY model calls a reply
+    # makes, this bounds how long ONE of them may hang. Hermes defaults to a 1800s request
+    # timeout, so a stalled upstream leaves the creator staring at nothing for half an hour
+    # with no error — observed live in QA on a provider stall. 90s turns that into a fast
+    # failure the creator can act on. Applied to whichever provider the brand's model uses.
+    provider_cfg = existing.setdefault("providers", {}).setdefault(provider_id, {})
+    provider_cfg["request_timeout_seconds"] = BRAND_REQUEST_TIMEOUT_SECONDS
+    provider_cfg["stale_timeout_seconds"] = BRAND_STALE_TIMEOUT_SECONDS
+
     # The curator is a BACKGROUND agent that periodically reviews sessions and rewrites
     # skills/memory. On a brand profile it burns LLM calls and repeatedly tries to edit
     # the (root-owned, correctly read-only) shared bundle — 27 PermissionErrors in one
@@ -435,9 +464,18 @@ def merge_config(config_path: str | Path, spec: dict) -> None:
     existing["ace"] = build_config(spec)
     if prior_onboarding_channel:
         existing["ace"]["onboarding"]["channel_id"] = prior_onboarding_channel
+    # Resolve the provider BEFORE the model key is rewritten below — that rewrite is where
+    # the routing info would otherwise disappear.
+    provider_id = _provider_id(existing)
     if spec.get("model"):
-        existing["model"] = spec["model"]  # Hermes reads top-level model; omit → inherit default
-    _apply_security_defaults(existing, spec, path.parent)
+        # Hermes reads the top-level `model`; omit → inherit the default. It may already be
+        # a dict ({default, provider, base_url, api_mode}) that Hermes wrote on profile
+        # create — pinning a brand model must change WHICH model, not lose how to reach it.
+        if isinstance(existing.get("model"), dict):
+            existing["model"]["default"] = spec["model"]
+        else:
+            existing["model"] = spec["model"]
+    _apply_security_defaults(existing, spec, path.parent, provider_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(existing, sort_keys=False), encoding="utf-8")
 

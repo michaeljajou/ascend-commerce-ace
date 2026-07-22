@@ -91,7 +91,15 @@ def normalize(field: str, raw: str) -> tuple[str | None, str | None]:
         candidate = text.lstrip("@").strip()
         if EMAIL_RE.match(candidate):
             return None, "looks_like_email"
-        return (candidate, None) if TIKTOK_RE.match(candidate) else (None, "not_a_handle")
+        if TIKTOK_RE.match(candidate):
+            return candidate, None
+        # "my tiktok is @javarisjavar" — pull the @-tagged token out of a sentence. Only
+        # an explicit @ counts: without it, "my tiktok is coming soon" would happily save
+        # "soon". Anything vaguer goes back as a re-ask, which costs one friendly line.
+        tagged = [t.lstrip("@").strip(".,!?;:\"')") for t in text.split() if t.startswith("@")]
+        if len(tagged) == 1 and TIKTOK_RE.match(tagged[0]):
+            return tagged[0], None
+        return None, "not_a_handle"
     if field == "email":
         return (text, None) if EMAIL_RE.match(text) else (None, "not_an_email")
     if field == "phone":

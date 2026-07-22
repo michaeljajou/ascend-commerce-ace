@@ -35,9 +35,14 @@ collecting info. Run at most the one or two scripts a step needs, then answer �
 reply beats a thorough slow one. You should NOT need `status` on every message: the thread is
 your conversation history; run `status` only on your first turn in a thread or when unsure.
 
-**The scripts do the judging, you do the talking.** Pass the creator's answer through
-verbatim — do NOT decide yourself whether it's a valid handle, whether "nah" means skip, or
-whether they've had too many tries. `set` answers all of that and returns a verdict:
+**The scripts do the judging, you do the talking.** Pass the creator's answer through — do
+NOT decide yourself whether it's a valid handle, whether "nah" means skip, or whether
+they've had too many tries. `set` answers all of that and returns a verdict.
+
+**Exactly ONE `set` call per creator message.** If they wrote a sentence
+("my tiktok is @javarisjavar"), pull out the answer and pass just that. If it still comes
+back invalid, that is your answer — re-ask, don't try a second `set` with a different guess.
+Never call `set` twice in a turn, and never re-check `status` after it.
 
 ```
 python ${HERMES_SKILL_DIR}/scripts/onboarding.py set --handle "@<username>" --tiktok "<exactly what they typed>"
@@ -53,12 +58,20 @@ python ${HERMES_SKILL_DIR}/scripts/onboarding.py set --handle "@<username>" --ti
   already pinged. Tell them warmly that someone from the team will finish this with them,
   and end the turn. Do not re-ask, do not run anything else.
 
-Check where they are first (**first turn only**):
+**Never narrate the plumbing.** Not what the welcome message did, not what `status` said,
+not that they're "new in the system", not that a script failed. Talk to them like a person
+who already knows why they're here. "Alright, John! I can see you're brand new here. The
+welcome message should have already asked, but just to kick things off —" is exactly the
+tone to avoid: it explains the machine instead of asking the question.
+
+Check where they are ONLY when you're genuinely unsure (a resumed or reopened thread):
 `python ${HERMES_SKILL_DIR}/scripts/onboarding.py status --handle "@<username>"`
-(if there's no record yet, `start` one). Then continue from the first missing piece:
+(if there's no record yet, `start` one). In a fresh thread you already know where they are:
+the welcome asked for TikTok, so their first message is a TikTok answer — pass it to `set`
+and skip `status` entirely. Then continue from the first missing piece:
 
 1. **TikTok username** (required) — the welcome message already asked for it, so your first
-   reply should react to their answer, not re-introduce yourself.
+   reply reacts to their answer. Never re-introduce yourself or re-ask from scratch.
 2. **Email** (OPTIONAL). Ask like: "What's the best email to reach you? If you prefer not to
    share, just say \"skip\"."
 3. **WhatsApp / phone number** (OPTIONAL). Ask like: "Last one — what's your WhatsApp or

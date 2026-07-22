@@ -350,6 +350,48 @@ def test_turn_cap_is_forced_in_both_directions(tmp_path, starting_config, why):
     assert yaml.safe_load(cfg.read_text())["agent"]["max_turns"] == setup.BRAND_MAX_TURNS, why
 
 
+def test_one_stalled_model_call_cannot_hang_a_creator_for_half_an_hour(tmp_path):
+    """Hermes defaults to a 1800s request timeout. Observed live in QA: an upstream stall
+    left a creator with no reply and no error, because nothing was ever going to cut it."""
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    setup.merge_config(cfg, make_spec())
+    provider = yaml.safe_load(cfg.read_text())["providers"]["openrouter"]
+    assert provider["request_timeout_seconds"] == setup.BRAND_REQUEST_TIMEOUT_SECONDS <= 120
+    assert provider["stale_timeout_seconds"] == setup.BRAND_STALE_TIMEOUT_SECONDS
+
+
+def test_timeouts_follow_the_brand_to_a_different_provider(tmp_path):
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"model": {"provider": "anthropic", "default": "x"}}),
+                   encoding="utf-8")
+    setup.merge_config(cfg, make_spec())
+    providers = yaml.safe_load(cfg.read_text())["providers"]
+    assert providers["anthropic"]["request_timeout_seconds"] == setup.BRAND_REQUEST_TIMEOUT_SECONDS
+    assert "openrouter" not in providers
+
+
+def test_pinning_a_brand_model_keeps_its_provider_routing(tmp_path):
+    """Hermes writes `model` as a dict carrying provider/base_url. Replacing the whole dict
+    with the spec's model string changes WHICH model AND loses how to reach it."""
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"model": {
+        "default": "deepseek/deepseek-v4-flash", "provider": "openrouter",
+        "base_url": "https://openrouter.ai/api/v1", "api_mode": "chat_completions",
+    }}), encoding="utf-8")
+    setup.merge_config(cfg, make_spec())          # spec pins anthropic/claude-sonnet-4-6
+
+    model = yaml.safe_load(cfg.read_text())["model"]
+    assert model["default"] == "anthropic/claude-sonnet-4-6"      # the pin applied
+    assert model["base_url"] == "https://openrouter.ai/api/v1"    # routing survived
+    assert model["api_mode"] == "chat_completions"
+
+
 def test_build_onboarding_carries_sheet_webhook():
     spec = make_spec(onboarding={"enabled": True, "sheet_webhook": "https://script.google.com/x"})
     assert setup.build_onboarding(spec)["sheet_webhook"] == "https://script.google.com/x"

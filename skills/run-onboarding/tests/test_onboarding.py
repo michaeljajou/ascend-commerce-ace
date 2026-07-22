@@ -219,9 +219,20 @@ def test_slack_exception_is_swallowed_not_raised(conn, monkeypatch):
     ("  @ava_tt  ", "ava_tt"),
     ("https://www.tiktok.com/@ava.tt", "ava.tt"),
     ("tiktok.com/@ava.tt", "ava.tt"),
+    ("my tiktok is @ava.tt", "ava.tt"),          # creators answer in sentences
+    ("it's @ava_tt!", "ava_tt"),
 ])
 def test_tiktok_accepts_the_shapes_creators_actually_send(raw, expected):
     assert onboarding.normalize("tiktok", raw) == (expected, None)
+
+
+@pytest.mark.parametrize("raw", [
+    "my tiktok is coming soon",       # 'soon' matches the handle shape — must NOT be saved
+    "my tiktok username is welcome-john-23",
+    "@one and @two",                  # ambiguous: which did they mean?
+])
+def test_sentence_extraction_needs_an_unambiguous_at_tag(raw):
+    assert onboarding.normalize("tiktok", raw) == (None, "not_a_handle")
 
 
 @pytest.mark.parametrize("raw, reason", [
