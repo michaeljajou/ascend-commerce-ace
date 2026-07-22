@@ -63,18 +63,39 @@ def bot_token(profile: Path) -> str | None:
     return None
 
 
-def gate_targets(channels: list[dict], onboarding_id: str) -> list[dict]:
+def is_already_private(channel: dict, guild_id: str, creator_role_ids: list[str]) -> bool:
+    """True when a place is deliberately locked down TIGHTER than the gate: @everyone
+    is denied and creators are not allowed (e.g. a Paid Collab category holding private
+    1:1 channels). The gate exists to hide public channels from un-onboarded members —
+    it must never WIDEN access, so these are left completely alone."""
+    ows = {o["id"]: o for o in channel.get("permission_overwrites", [])}
+    if not int(ows.get(guild_id, {}).get("deny", 0)) & VIEW_CHANNEL:
+        return False
+    return not any(int(ows.get(rid, {}).get("allow", 0)) & VIEW_CHANNEL
+                   for rid in creator_role_ids)
+
+
+def gate_targets(channels: list[dict], onboarding_id: str, *, guild_id: str = "",
+                 creator_role_ids: list[str] | None = None) -> list[dict]:
     """What to actually write to: CATEGORIES plus channels that have no category.
 
     Discord channels inherit their category's overwrites, so gating the category is
     both sufficient and the only thing that reliably works — writing redundant
     per-channel overwrites is what produced a screen of harmless 403s in QA. The
-    onboarding channel is always included so its door stays explicitly open.
+    onboarding channel is always included so its door stays explicitly open, and
+    already-private places are excluded so the gate can only ever narrow access.
     """
-    return [c for c in channels
-            if c.get("type") == 4                      # category
-            or not c.get("parent_id")                  # orphan channel
-            or c["id"] == onboarding_id]
+    out = []
+    for c in channels:
+        if c["id"] == onboarding_id:
+            out.append(c)
+            continue
+        if c.get("type") != 4 and c.get("parent_id"):
+            continue                                   # child: inherits its category
+        if guild_id and creator_role_ids and is_already_private(c, guild_id, creator_role_ids):
+            continue                                   # private on purpose — don't touch
+        out.append(c)
+    return out
 
 
 def leaky_channels(channels: list[dict], guild_id: str, onboarding_id: str) -> list[dict]:
@@ -184,7 +205,11 @@ def main(argv: list[str] | None = None) -> int:
     except urllib.error.HTTPError:
         bot_user_id = bot_role_id = None
 
-    targets = gate_targets(channels, onboarding_id)
+    targets = gate_targets(channels, onboarding_id, guild_id=guild_id,
+                           creator_role_ids=creator_role_ids)
+    skipped_private = [c.get("name") for c in channels
+                       if c.get("type") == 4 and c not in targets
+                       and is_already_private(c, guild_id, creator_role_ids)]
     leaks = leaky_channels(channels, guild_id, onboarding_id)
     verb = "OPEN" if args.open else "GATE"
 
@@ -252,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         "note": "child channels inherit their category — only categories/orphans are written",
         "creator_roles": creator_role_ids, "staff_role": staff_role_id,
         "bot_role": bot_role_id, "onboarding_channel": onboarding_id,
+        "left_private_untouched": skipped_private,
         "leaky_channels": [c.get("name") for c in leaks],
         "next": ("re-run with --apply to write these" if not args.apply else
                  "new members now see only the onboarding channel until Ace assigns their roles"),

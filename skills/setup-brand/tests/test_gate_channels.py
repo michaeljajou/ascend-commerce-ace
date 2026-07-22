@@ -100,3 +100,25 @@ def test_bot_granted_as_a_member_counts_as_allowed():
     out = plan({"id": "cat1", "name": "Text Channels",
                 "permission_overwrites": [bot_member_overwrite]})
     assert bot_member_overwrite in out          # kept verbatim, never stripped
+
+
+def test_already_private_categories_are_left_alone():
+    """The gate narrows access; it must never widen it. A category that denies
+    @everyone and does NOT allow creators (private 1:1 collab space) is skipped."""
+    private_cat = {"id": "cat_paid", "type": 4, "name": "Paid Collab",
+                   "permission_overwrites": [{"id": GUILD, "allow": "0",
+                                              "deny": str(gate.VIEW_CHANNEL)}]}
+    public_cat = {"id": "cat_text", "type": 4, "name": "Text Channels",
+                  "permission_overwrites": []}
+    already_gated = {"id": "cat_comm", "type": 4, "name": "Community",
+                     "permission_overwrites": [
+                         {"id": GUILD, "allow": "0", "deny": str(gate.VIEW_CHANNEL)},
+                         {"id": CREATORS[0], "allow": str(gate.VIEW_CHANNEL), "deny": "0"}]}
+    assert gate.is_already_private(private_cat, GUILD, CREATORS) is True
+    assert gate.is_already_private(public_cat, GUILD, CREATORS) is False
+    assert gate.is_already_private(already_gated, GUILD, CREATORS) is False  # ours, re-gate ok
+
+    got = {c["id"] for c in gate.gate_targets(
+        [private_cat, public_cat, already_gated], ONBOARDING,
+        guild_id=GUILD, creator_role_ids=CREATORS)}
+    assert got == {"cat_text", "cat_comm"}      # Paid Collab untouched
