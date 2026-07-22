@@ -90,3 +90,13 @@ def test_bot_allow_and_everyone_deny_land_in_one_patch():
     out = by_id(plan({"id": "cat1", "name": "Text Channels", "permission_overwrites": []}))
     assert out[GUILD] == (0, gate.VIEW_CHANNEL)
     assert out[BOT] == (gate.VIEW_CHANNEL, 0)          # same patch, no lockout window
+
+
+def test_bot_granted_as_a_member_counts_as_allowed():
+    """Operators often grant the bot USER directly rather than its role. A member-level
+    overwrite is preserved by the plan and must satisfy the lockout guard too."""
+    bot_member_overwrite = {"id": "bot-user-1", "type": 1,
+                            "allow": str(gate.VIEW_CHANNEL), "deny": "0"}
+    out = plan({"id": "cat1", "name": "Text Channels",
+                "permission_overwrites": [bot_member_overwrite]})
+    assert bot_member_overwrite in out          # kept verbatim, never stripped

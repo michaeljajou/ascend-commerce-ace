@@ -99,6 +99,8 @@ def plan_overwrites(channel: dict, *, guild_id: str, creator_role_ids: list[str]
     own the @everyone / creator-role / staff-role / bot-role entries.
     """
     owned = {guild_id, staff_role_id, bot_role_id, *creator_role_ids} - {None}
+    # NOTE: a member-level overwrite for the bot user is NOT in `owned`, so it lands in
+    # `kept` and is preserved verbatim — operators who grant the bot directly keep it.
     kept = [o for o in channel.get("permission_overwrites", []) if o["id"] not in owned]
 
     if channel["id"] == onboarding_id or opening:
@@ -173,13 +175,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"WARNING: staff role {staff_name!r} not found — the team will rely on "
               "Administrator to see gated channels.", file=sys.stderr)
 
-    # The bot's own role, so gating can never lock Ace out of the channels it reads.
+    # The bot's own role/user, so gating can never lock Ace out of the channels it reads.
     try:
         me = discord(token, "/users/@me")
-        bot_member = discord(token, f"/guilds/{guild_id}/members/{me['id']}")
+        bot_user_id = me["id"]
+        bot_member = discord(token, f"/guilds/{guild_id}/members/{bot_user_id}")
         bot_role_id = next((r for r in bot_member.get("roles", []) if r != guild_id), None)
     except urllib.error.HTTPError:
-        bot_role_id = None
+        bot_user_id = bot_role_id = None
 
     targets = gate_targets(channels, onboarding_id)
     leaks = leaky_channels(channels, guild_id, onboarding_id)
@@ -194,7 +197,13 @@ def main(argv: list[str] | None = None) -> int:
     for c in targets:
         ows = {o["id"]: o for o in c.get("permission_overwrites", [])}
         everyone_denies = int(ows.get(guild_id, {}).get("deny", 0)) & VIEW_CHANNEL
-        bot_allowed = bot_role_id and int(ows.get(bot_role_id, {}).get("allow", 0)) & VIEW_CHANNEL
+        # The allow can be granted to the bot's ROLE or directly to the bot USER
+        # (a member overwrite) — operators commonly add the bot itself, which is the
+        # more precise grant. Either satisfies the check.
+        bot_allowed = any(
+            ident and int(ows.get(ident, {}).get("allow", 0)) & VIEW_CHANNEL
+            for ident in (bot_role_id, bot_user_id)
+        )
         if everyone_denies and not bot_allowed:
             fenced.append(c)
     if fenced:
