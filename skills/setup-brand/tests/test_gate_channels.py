@@ -12,9 +12,13 @@ STAFF = "r_staff"
 ONBOARDING = "900"
 
 
+BOT = "r_bot"
+
+
 def plan(channel, *, opening=False):
     return gate.plan_overwrites(channel, guild_id=GUILD, creator_role_ids=CREATORS,
-                                staff_role_id=STAFF, onboarding_id=ONBOARDING, opening=opening)
+                                staff_role_id=STAFF, onboarding_id=ONBOARDING, opening=opening,
+                                bot_role_id=BOT)
 
 
 def by_id(overwrites):
@@ -27,6 +31,7 @@ def test_public_channel_is_hidden_from_everyone_and_opened_to_creators():
     for rid in CREATORS:
         assert out[rid] == (gate.VIEW_CHANNEL, 0)          # onboarded creators can
     assert out[STAFF] == (gate.VIEW_CHANNEL, 0)            # team never locked out
+    assert out[BOT] == (gate.VIEW_CHANNEL, 0)              # Ace never locks itself out
 
 
 def test_onboarding_channel_keeps_the_door_open():
@@ -51,3 +56,29 @@ def test_open_mode_restores_visibility_everywhere():
     out = by_id(plan({"id": "555", "name": "x", "permission_overwrites": []}, opening=True))
     assert out[GUILD] == (gate.VIEW_CHANNEL, 0)
     assert "r_creator" not in out                          # gate overwrites removed
+
+
+def test_only_categories_and_orphans_are_written():
+    """Children inherit their category — writing per-channel overwrites is redundant
+    and is what produced a screen of 403s in QA."""
+    channels = [
+        {"id": "cat1", "type": 4, "name": "Text Channels"},
+        {"id": "555", "type": 0, "name": "community-chat", "parent_id": "cat1"},
+        {"id": "777", "type": 0, "name": "orphan"},
+        {"id": ONBOARDING, "type": 0, "name": "onboarding"},
+    ]
+    got = {c["id"] for c in gate.gate_targets(channels, ONBOARDING)}
+    assert got == {"cat1", "777", ONBOARDING}      # the child is left to inherit
+
+
+def test_leaky_child_channels_are_detected():
+    """A child that re-allows @everyone view defeats a gated category."""
+    channels = [
+        {"id": "555", "name": "leaky", "parent_id": "cat1",
+         "permission_overwrites": [{"id": GUILD, "allow": str(gate.VIEW_CHANNEL), "deny": "0"}]},
+        {"id": "556", "name": "fine", "parent_id": "cat1", "permission_overwrites": []},
+        {"id": ONBOARDING, "name": "onboarding", "parent_id": "cat1",
+         "permission_overwrites": [{"id": GUILD, "allow": str(gate.VIEW_CHANNEL), "deny": "0"}]},
+    ]
+    leaks = [c["name"] for c in gate.leaky_channels(channels, GUILD, ONBOARDING)]
+    assert leaks == ["leaky"]                      # onboarding is meant to be open

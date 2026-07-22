@@ -63,14 +63,42 @@ def bot_token(profile: Path) -> str | None:
     return None
 
 
+def gate_targets(channels: list[dict], onboarding_id: str) -> list[dict]:
+    """What to actually write to: CATEGORIES plus channels that have no category.
+
+    Discord channels inherit their category's overwrites, so gating the category is
+    both sufficient and the only thing that reliably works — writing redundant
+    per-channel overwrites is what produced a screen of harmless 403s in QA. The
+    onboarding channel is always included so its door stays explicitly open.
+    """
+    return [c for c in channels
+            if c.get("type") == 4                      # category
+            or not c.get("parent_id")                  # orphan channel
+            or c["id"] == onboarding_id]
+
+
+def leaky_channels(channels: list[dict], guild_id: str, onboarding_id: str) -> list[dict]:
+    """Children whose OWN @everyone overwrite re-allows View Channel — these defeat a
+    gated category, so the operator has to know about them."""
+    out = []
+    for c in channels:
+        if c["id"] == onboarding_id or not c.get("parent_id"):
+            continue
+        for o in c.get("permission_overwrites", []):
+            if o["id"] == guild_id and int(o.get("allow", 0)) & VIEW_CHANNEL:
+                out.append(c)
+    return out
+
+
 def plan_overwrites(channel: dict, *, guild_id: str, creator_role_ids: list[str],
-                    staff_role_id: str | None, onboarding_id: str, opening: bool) -> list[dict]:
+                    staff_role_id: str | None, onboarding_id: str, opening: bool,
+                    bot_role_id: str | None = None) -> list[dict]:
     """The permission overwrites this channel should end up with.
 
     Existing overwrites for other roles/members are preserved untouched — we only
-    own the @everyone / creator-role / staff-role entries.
+    own the @everyone / creator-role / staff-role / bot-role entries.
     """
-    owned = {guild_id, staff_role_id, *creator_role_ids} - {None}
+    owned = {guild_id, staff_role_id, bot_role_id, *creator_role_ids} - {None}
     kept = [o for o in channel.get("permission_overwrites", []) if o["id"] not in owned]
 
     if channel["id"] == onboarding_id or opening:
@@ -88,8 +116,11 @@ def plan_overwrites(channel: dict, *, guild_id: str, creator_role_ids: list[str]
     out = [{"id": guild_id, "type": ROLE, "allow": "0", "deny": str(VIEW_CHANNEL)}]
     out += [{"id": rid, "type": ROLE, "allow": str(VIEW_CHANNEL), "deny": "0"}
             for rid in creator_role_ids]
-    if staff_role_id:
-        out.append({"id": staff_role_id, "type": ROLE, "allow": str(VIEW_CHANNEL), "deny": "0"})
+    for rid in (staff_role_id, bot_role_id):
+        # The bot's own role is explicitly allowed: without it, gating a category can
+        # lock Ace out of the very channels it has to read (campaigns, community-chat).
+        if rid:
+            out.append({"id": rid, "type": ROLE, "allow": str(VIEW_CHANNEL), "deny": "0"})
     return kept + out
 
 
@@ -142,14 +173,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"WARNING: staff role {staff_name!r} not found — the team will rely on "
               "Administrator to see gated channels.", file=sys.stderr)
 
-    # Text/voice/forum/announcement channels; categories (type 4) inherit to their children.
-    targets = [c for c in channels if c.get("type") in (0, 2, 4, 5, 15)]
+    # The bot's own role, so gating can never lock Ace out of the channels it reads.
+    try:
+        me = discord(token, "/users/@me")
+        bot_member = discord(token, f"/guilds/{guild_id}/members/{me['id']}")
+        bot_role_id = next((r for r in bot_member.get("roles", []) if r != guild_id), None)
+    except urllib.error.HTTPError:
+        bot_role_id = None
+
+    targets = gate_targets(channels, onboarding_id)
+    leaks = leaky_channels(channels, guild_id, onboarding_id)
     verb = "OPEN" if args.open else "GATE"
     changed = 0
     for channel in sorted(targets, key=lambda c: c.get("position", 0)):
         desired = plan_overwrites(channel, guild_id=guild_id, creator_role_ids=creator_role_ids,
                                   staff_role_id=staff_role_id, onboarding_id=onboarding_id,
-                                  opening=args.open)
+                                  opening=args.open, bot_role_id=bot_role_id)
         current = channel.get("permission_overwrites", [])
         same = {(o["id"], str(o.get("allow", "0")), str(o.get("deny", "0"))) for o in current} == \
                {(o["id"], str(o.get("allow", "0")), str(o.get("deny", "0"))) for o in desired}
@@ -168,10 +207,20 @@ def main(argv: list[str] | None = None) -> int:
         except urllib.error.HTTPError as exc:
             print(f"  FAILED {label}: {exc.code} {exc.read().decode()[:120]}", file=sys.stderr)
 
+    if leaks and not args.open:
+        print("\nWARNING: these channels re-allow @everyone to view, which defeats the gate "
+              "for them — clear that overwrite in Discord (Edit Channel → Permissions):",
+              file=sys.stderr)
+        for c in leaks:
+            print(f"  #{c.get('name')}", file=sys.stderr)
+
     print(json.dumps({
-        "mode": verb, "applied": bool(args.apply), "channels_changed": changed,
+        "mode": verb, "applied": bool(args.apply),
+        "categories_and_orphans_changed": changed,
+        "note": "child channels inherit their category — only categories/orphans are written",
         "creator_roles": creator_role_ids, "staff_role": staff_role_id,
-        "onboarding_channel": onboarding_id,
+        "bot_role": bot_role_id, "onboarding_channel": onboarding_id,
+        "leaky_channels": [c.get("name") for c in leaks],
         "next": ("re-run with --apply to write these" if not args.apply else
                  "new members now see only the onboarding channel until Ace assigns their roles"),
     }, indent=2))
