@@ -332,14 +332,22 @@ def test_the_agent_can_never_write_itself_a_skill(tmp_path):
     assert data["memory"]["memory_enabled"] is True
 
 
-def test_turn_cap_leaves_headroom_for_the_budget_notice(tmp_path):
+@pytest.mark.parametrize("starting_config, why", [
+    ({}, "fresh profile"),
+    ({"agent": {"max_turns": 150}}, "Hermes default, clamped down"),
+    ({"agent": {"max_turns": 8}}, "stale earlier baseline, raised back up"),
+])
+def test_turn_cap_is_forced_in_both_directions(tmp_path, starting_config, why):
     """Discord has no suppression for '⚠️ Iteration budget exhausted (n/n)' — the gateway's
-    status filter is Telegram-only — so the cap must sit above what a real turn costs."""
+    status filter is Telegram-only — so the cap must sit above what a real turn costs. A
+    clamp that only ever LOWERED the value left 8 on the deployed profile and re-ran clean.
+    """
     import yaml
 
     cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump(starting_config), encoding="utf-8")
     setup.merge_config(cfg, make_spec())
-    assert yaml.safe_load(cfg.read_text())["agent"]["max_turns"] >= 12
+    assert yaml.safe_load(cfg.read_text())["agent"]["max_turns"] == setup.BRAND_MAX_TURNS, why
 
 
 def test_build_onboarding_carries_sheet_webhook():

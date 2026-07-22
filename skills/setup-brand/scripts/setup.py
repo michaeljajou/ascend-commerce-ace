@@ -269,6 +269,10 @@ def ensure_env(profile_dir: str | Path, updates: dict[str, str]) -> str:
 # The complete creator-facing Discord toolset (allow-list — see _apply_security_defaults).
 BRAND_DISCORD_TOOLSET = ["code_execution", "file", "vision"]
 
+# Sequential tool round trips allowed per reply (Hermes ships 150). See the latency note in
+# _apply_security_defaults for why this is a floor as well as a ceiling.
+BRAND_MAX_TURNS = 12
+
 # Security hardening baseline applied to EVERY brand profile. These are forced
 # (not setdefault) because they are the security posture, not a per-brand style
 # choice — an operator who wants to loosen one after setup can hand-edit
@@ -381,10 +385,10 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path") ->
     # adapter has no suppression for it (the status filter is Telegram-only). So the cap
     # has to sit far enough above the real cost of a turn that creators never see it.
     # With `skills` gone the worst real onboarding turn is ~4 calls; 12 leaves 3x margin.
+    # Forced in BOTH directions, like the rest of this block: an earlier baseline left 8 on
+    # the deployed profile, and a clamp that only ever lowered the value silently kept it.
     agent_cfg = existing.setdefault("agent", {})
-    agent_cfg["max_turns"] = int(agent_cfg.get("max_turns") or 0) or 12
-    if agent_cfg["max_turns"] > 12:
-        agent_cfg["max_turns"] = 12
+    agent_cfg["max_turns"] = BRAND_MAX_TURNS
 
     # The curator is a BACKGROUND agent that periodically reviews sessions and rewrites
     # skills/memory. On a brand profile it burns LLM calls and repeatedly tries to edit
