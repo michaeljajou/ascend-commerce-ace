@@ -312,6 +312,15 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path") ->
     existing["approvals"] = {
         **(existing.get("approvals") or {}),
         "mode": "smart",
+        # cron_mode MUST NOT be "deny". Hermes blocks execute_code outright in any
+        # session flagged as cron/no-approver, and every Ace skill works by running a
+        # vetted Python script — so "deny" silently breaks the entire bundle: the agent
+        # chats normally but nothing is ever recorded. Diagnosed in QA when a creator
+        # completed onboarding and no data was saved anywhere (it also explains the
+        # agent's earlier attempts to smuggle scripts through self-made cron jobs).
+        # Safe here because the surface is already tiny: no terminal tool,
+        # code_execution.mode=strict, and command_allowlist scoped to this brand.
+        "cron_mode": "approve",
     }
     existing["code_execution"] = {
         **(existing.get("code_execution") or {}),

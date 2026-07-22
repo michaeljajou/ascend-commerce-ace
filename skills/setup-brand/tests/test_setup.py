@@ -310,3 +310,18 @@ def test_build_onboarding_carries_sheet_webhook():
     spec = make_spec(onboarding={"enabled": True, "sheet_webhook": "https://script.google.com/x"})
     assert setup.build_onboarding(spec)["sheet_webhook"] == "https://script.google.com/x"
     assert "sheet_webhook" not in setup.build_onboarding(make_spec())
+
+
+def test_cron_mode_is_never_deny(tmp_path):
+    """approvals.cron_mode=deny blocks execute_code, which silently breaks every skill
+    (they all run scripts). The baseline must force it back."""
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"approvals": {"mode": "off", "cron_mode": "deny",
+                                                 "timeout": 60}}), encoding="utf-8")
+    setup.merge_config(cfg, make_spec())
+    approvals = yaml.safe_load(cfg.read_text())["approvals"]
+    assert approvals["cron_mode"] == "approve"
+    assert approvals["mode"] == "smart"          # still hardened
+    assert approvals["timeout"] == 60            # unrelated keys preserved
