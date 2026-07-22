@@ -269,19 +269,44 @@ def test_merge_config_preserves_onboarding_channel_id(tmp_path):
     assert yaml.safe_load(cfg.read_text())["ace"]["onboarding"]["channel_id"] == "900"
 
 
-def test_merge_config_strips_noisy_tools_and_chatter(tmp_path):
+def test_merge_config_locks_discord_to_the_minimal_toolset(tmp_path):
+    """Every extra tool is another LLM round trip = creator-visible latency."""
     import yaml
 
     cfg = tmp_path / "config.yaml"
     cfg.write_text(yaml.safe_dump({"platform_toolsets": {
-        "discord": ["web", "terminal", "clarify", "cronjob", "delegation", "skills"],
+        "discord": ["web", "terminal", "clarify", "cronjob", "delegation", "browser", "memory"],
         "cli": ["web", "terminal", "clarify", "cronjob"],
     }}), encoding="utf-8")
     setup.merge_config(cfg, make_spec())
     data = yaml.safe_load(cfg.read_text())
-    assert data["platform_toolsets"]["discord"] == ["web", "skills"]   # all four stripped
-    assert data["platform_toolsets"]["cli"] == ["web", "cronjob"]      # cli keeps cronjob
+    assert data["platform_toolsets"]["discord"] == setup.BRAND_DISCORD_TOOLSET
+    assert "terminal" not in data["platform_toolsets"]["discord"]
+    assert "delegation" not in data["platform_toolsets"]["discord"]   # the 6-minute replies
+    assert "clarify" not in data["platform_toolsets"]["discord"]      # "Hermes needs your input"
+    assert data["platform_toolsets"]["cli"] == ["web", "cronjob"]     # cli keeps its own tools
     display = data["display"]
     assert display["file_mutation_verifier"] is False
     assert display["turn_completion_explainer"] is False
     assert display["credits_notices"] is False
+
+
+def test_merge_config_caps_turns_and_disables_curator(tmp_path):
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"agent": {"max_turns": 150, "gateway_timeout": 900},
+                                   "curator": {"enabled": True, "interval_hours": 168}}),
+                   encoding="utf-8")
+    setup.merge_config(cfg, make_spec())
+    data = yaml.safe_load(cfg.read_text())
+    assert data["agent"]["max_turns"] == 8                  # 150 round trips -> 8
+    assert data["agent"]["gateway_timeout"] == 900          # other agent keys preserved
+    assert data["curator"]["enabled"] is False              # no background skill rewrites
+    assert data["curator"]["interval_hours"] == 168         # rest of curator config intact
+
+
+def test_build_onboarding_carries_sheet_webhook():
+    spec = make_spec(onboarding={"enabled": True, "sheet_webhook": "https://script.google.com/x"})
+    assert setup.build_onboarding(spec)["sheet_webhook"] == "https://script.google.com/x"
+    assert "sheet_webhook" not in setup.build_onboarding(make_spec())

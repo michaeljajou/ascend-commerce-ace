@@ -41,7 +41,20 @@ marked *(portal)* live in the Discord **Developer Portal**; *(server)* items liv
    gateway try to run a Slack platform and retry-connect forever; brands are outbound-only).
 6. **Before enabling onboarding** (`ace.onboarding.enabled`): turn **Vaulty's join handling
    OFF** on that server — running both risks duplicate onboarding spaces and role conflicts.
-7. After any of the above changes: re-run step 3b (resolve_channels) + restart the gateway.
+7. *(Sheets, optional but recommended)* Create the team's creator sheet: Extensions → Apps
+   Script, paste the `doPost` snippet from `_lib/sheet.py`, Deploy → Web app (execute as
+   you, access "Anyone"), and put the resulting URL in the spec as
+   `onboarding.sheet_webhook`. Completed onboardings then append themselves as rows.
+8. *(Access gate)* To lock the server until onboarding is done — new members see ONLY the
+   onboarding channel — run after step 3b:
+   ```
+   python /opt/data/ascend-commerce-ace/skills/setup-brand/scripts/gate_channels.py --profile-dir <profile_dir>          # dry run
+   python /opt/data/ascend-commerce-ace/skills/setup-brand/scripts/gate_channels.py --profile-dir <profile_dir> --apply
+   ```
+   It denies @everyone View Channel on every public channel and grants it to the
+   `onboarded`/`creator` roles (staff keeps access; the onboarding channel stays visible —
+   it's the only door in). `--apply --open` reverses it. Run it again after adding channels.
+9. After any of the above changes: re-run step 3b (resolve_channels) + restart the gateway.
 
 Verify items 1–3 without clicking around: `assign_role.py` and the tick scripts print precise
 errors, and a members-list API call failing with `Missing Access` means the intent (1) is off.

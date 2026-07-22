@@ -185,6 +185,10 @@ def build_onboarding(spec: dict) -> dict:
     }
     if ob.get("welcome_message"):
         block["welcome_message"] = ob["welcome_message"]
+    if ob.get("sheet_webhook"):
+        block["sheet_webhook"] = ob["sheet_webhook"]     # Apps Script URL (see _lib/sheet.py)
+    if ob.get("gate_role"):
+        block["gate_role"] = ob["gate_role"]             # optional pre-onboarding holding role
     if ob.get("slack_channel"):
         block["slack_channel"] = ob["slack_channel"]     # else escalations use ace.slack_channel
     return block
@@ -258,6 +262,9 @@ def ensure_env(profile_dir: str | Path, updates: dict[str, str]) -> str:
     return str(env_path)
 
 
+# The complete creator-facing Discord toolset (allow-list — see _apply_security_defaults).
+BRAND_DISCORD_TOOLSET = ["code_execution", "file", "skills", "vision"]
+
 # Security hardening baseline applied to EVERY brand profile. These are forced
 # (not setdefault) because they are the security posture, not a per-brand style
 # choice — an operator who wants to loosen one after setup can hand-edit
@@ -315,24 +322,37 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path") ->
         "idle_minutes": 60,
     }
 
-    # Tools a creator-facing brand agent must never surface (each earned its place in QA):
-    #   terminal   — shell access (security)
-    #   clarify    — emits "Hermes needs your input" prompts into the creator's chat
-    #   cronjob    — a flailing agent once self-scheduled jobs whose output spammed a thread
-    #   delegation — subagent spawning turns a 20s reply into a 6-minute one
-    _STRIP_TOOLSETS = {
-        "discord": {"terminal", "clarify", "cronjob", "delegation"},
-        "cli": {"terminal", "clarify"},
-    }
+    # The brand's creator-facing Discord toolset is an ALLOW-list, not a subtraction:
+    # every extra tool is another LLM round trip the agent might spend, and each round
+    # trip is 5–45s of creator-visible latency. These four cover every Ace flow —
+    # scripts (code_execution), skill loading (skills), the odd file read (file), and
+    # creator screenshots (vision). Everything else is removed on purpose:
+    #   terminal/browser/web — shell + open internet: security and fabrication risk
+    #   clarify              — emits "Hermes needs your input" and BLOCKS the turn
+    #   cronjob              — a flailing agent self-scheduled jobs that spammed a thread
+    #   delegation           — subagent spawning: the 6-minute replies
+    #   memory/todo/session_search/tts — unused here; each is a wasted round trip
     platform_toolsets = existing.setdefault("platform_toolsets", {})
-    for platform, banned in _STRIP_TOOLSETS.items():
-        current = platform_toolsets.get(platform)
-        if not isinstance(current, list):
-            # Hermes' own profile defaults populate this on `hermes profile create`;
-            # if it's somehow missing, don't invent a full toolset list here — just
-            # ensure the banned tools can never sneak back in on the next line.
-            current = []
-        platform_toolsets[platform] = [t for t in current if t not in banned]
+    platform_toolsets["discord"] = BRAND_DISCORD_TOOLSET
+    cli = platform_toolsets.get("cli")
+    if not isinstance(cli, list):
+        cli = []
+    platform_toolsets["cli"] = [t for t in cli if t not in {"terminal", "clarify"}]
+
+    # Latency ceiling. Hermes defaults to 150 sequential tool round trips per reply;
+    # a creator-facing support bot needs ~2. Measured in QA: one onboarding reply
+    # burned 17 round trips over 6 minutes (mostly the agent retrying skill edits).
+    # This caps the worst case at seconds, not minutes.
+    agent_cfg = existing.setdefault("agent", {})
+    agent_cfg["max_turns"] = int(agent_cfg.get("max_turns") or 0) or 8
+    if agent_cfg["max_turns"] > 8:
+        agent_cfg["max_turns"] = 8
+
+    # The curator is a BACKGROUND agent that periodically reviews sessions and rewrites
+    # skills/memory. On a brand profile it burns LLM calls and repeatedly tries to edit
+    # the (root-owned, correctly read-only) shared bundle — 27 PermissionErrors in one
+    # QA session. Brand skills are managed from git, never by the agent.
+    existing.setdefault("curator", {})["enabled"] = False
 
     # Zero operational chatter in creator-facing chat: no tool progress, no mid-turn
     # notes, no file-verifier output, no turn explainers, no credits notices.

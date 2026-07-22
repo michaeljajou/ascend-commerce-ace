@@ -65,8 +65,11 @@ Check where they are first (first turn only): `python ${HERMES_SKILL_DIR}/script
    python ${HERMES_SKILL_DIR}/scripts/onboarding.py complete --handle "@<username>" --role creator
    ```
    If `assign_role.py` exits non-zero: **never fail silently** — this blocks their channel
-   access. Tell the creator the team's been looped in to finish their access, AND post the
-   script's error to Slack (`slack_cli.py`) immediately. Do not mark complete.
+   access (with the access gate on, those roles ARE their key to the server). Tell the
+   creator the team's been looped in to finish their access, AND post the script's error to
+   Slack (`slack_cli.py`) immediately. Do not mark complete.
+   `complete` also pushes their record to the team's Google Sheet automatically — nothing
+   for you to do, and a sheet outage is logged without blocking the creator.
 5. **Guidance sequence** — ONE friendly message, in the brand voice, covering in order:
    1. What the key channels are for (use clickable `<#id>` tags from the SOUL Channel directory;
       just the few that matter to someone brand new).
@@ -101,6 +104,11 @@ End your turn with only `[SILENT]`.
   as raw "Cronjob Response" spam. If a script fails, run it once more; if it still fails,
   post the exact error to Slack (`_lib/slack_cli.py`), tell the creator the team will finish
   their setup, and END the turn. A short clean failure beats a long improvised one.
+- **NEVER edit skills** (`skill_manage`, writing to the bundle, "saving notes to the skill").
+  The bundle is read-only by design and managed from git — attempts just fail and burn the
+  creator's time. In one QA session this cost 27 failed writes and minutes of silence.
+- **Every extra tool call is seconds of creator-visible latency.** Aim for at most 1–2 script
+  runs per reply, then answer. Don't re-read files or re-check state you already have.
 - Keep turns short — one question or one step per message. No status chatter, no walls of text.
 - The tick already marked them nudged when it woke you — deliver every nudge you were handed;
   if delivery fails both ways, post the failure to Slack instead of dropping it.

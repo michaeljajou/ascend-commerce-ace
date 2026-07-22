@@ -35,6 +35,12 @@ When an authorized operator issues an admin action.
   python $ONBOARD test-mode on|off               # compressed timers for QA on this server
   python $ONBOARD stats                          # completion / nudge / escalation metrics
   ```
+  Creator data (TikTok, email, phone) syncs to the team's Google Sheet automatically at
+  completion. To pull it directly or re-sync after a sheet outage:
+  ```
+  python ${HERMES_SKILL_DIR}/../run-onboarding/scripts/export_creators.py --out /tmp/creators.csv
+  python ${HERMES_SKILL_DIR}/../run-onboarding/scripts/export_creators.py --push
+  ```
   Ad-hoc nudge outside the schedule: compose it per `run-onboarding` Nudge mode and send with
   `run-onboarding/scripts/send_dm.py`. The whole flow's master switch is
   `ace.onboarding.enabled` in the profile config (flip + restart the gateway).

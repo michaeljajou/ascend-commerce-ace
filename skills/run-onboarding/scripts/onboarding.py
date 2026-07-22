@@ -80,7 +80,12 @@ def complete(conn, handle: str, role: str = "Creator", now: float | None = None)
     c.onboarding_state = COMPLETE
     store.upsert_creator(conn, c)
     store.mark_active(conn, handle, ts=now)
-    return {"handle": handle, "state": COMPLETE, "role": role}
+    # Push the record to the team's Google Sheet automatically (no-op when the brand
+    # has no sheet_webhook). Deterministic, and a sheet outage never blocks a creator.
+    from _lib import sheet
+
+    synced = sheet.sync_creator(store.get_onboarding(conn, handle) or {})
+    return {"handle": handle, "state": COMPLETE, "role": role, "sheet_synced": synced}
 
 
 def guided(conn, handle: str, now: float | None = None) -> dict:
