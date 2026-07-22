@@ -1,7 +1,7 @@
 ---
 name: run-onboarding
-description: Onboard a new creator in their private thread — collect TikTok handle + email with retry limits, assign their role (never fail silently), deliver the guidance sequence, and send 48h nudges. Replaces the Vaulty bot.
-version: 0.2.0
+description: Onboard a new creator in their private thread — run one script per message to collect their TikTok handle and contact details, assign their roles, deliver the guidance sequence, and send 48h nudges. Replaces the Vaulty bot.
+version: 0.3.0
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -11,98 +11,61 @@ metadata:
 
 # Run Onboarding (creator)
 
-Takes a creator from "just joined" to "actively participating" with zero manual work. The
-zero-token cron tick (`ace-onboarding-tick.py`) detects joins, creates the private thread, and
-posts the welcome + username ask — **you** take over from the creator's first reply.
+## The loop — read this first
+
+A creator has said something in their private onboarding thread. **They are mid-conversation,
+not at the start of one.** The welcome message already greeted them and already asked for
+their TikTok username, so their message is an ANSWER. Do not greet them. Do not re-ask.
+
+Run exactly this, once:
+
+```
+python ${HERMES_SKILL_DIR}/scripts/onboarding.py answer --handle "@<username>" --text "<their message, verbatim>"
+```
+
+`--handle` comes from the THREAD NAME: thread `welcome-jane77` → `@jane77`. Never their
+display name — that creates phantom records.
+
+Then write ONE short, warm message based on what came back:
+
+| Result | What you say |
+|---|---|
+| `"ask": "<field>"` | React briefly to what they gave, then ask `question` in your own words |
+| `"ok": false` with `hint` | Re-ask that field once, warmly, guided by `hint` |
+| `"limit_reached": true` | Stop asking. The team is already paged. Tell them someone will help |
+| `"ok": true, "ask": null` | They're done and their roles are set → deliver **guidance** (below) |
+| `"needs_team": true` | Roles failed, team already paged. Say someone's finishing their access |
+
+That is the entire collection flow. One script call, one reply. The script decides which
+question is outstanding, whether an answer is valid, what counts as "skip", and when
+patience has run out — **you decide none of that.** Don't run `status`, don't run `set`,
+don't check state "to be sure", and never call `answer` twice in one turn.
+
+The one exception: if their message is plainly a QUESTION rather than an answer ("what is
+this?", "who are you?"), just answer it and re-ask the outstanding question — don't run
+`answer` on a question.
 
 **Master switch:** if `ace.onboarding.enabled` is false in the profile config, do nothing —
 tell whoever asked that onboarding is currently disabled.
 
-## When to Use
-- **Conversation mode:** any creator message in their private onboarding thread (this skill is
-  bound to the onboarding channel; threads inherit it).
-- **Nudge mode:** the cron tick woke you with `onboarding_nudges_due`.
+## Guidance sequence
 
-## Conversation mode
+Once `answer` reports they're complete, send ONE friendly message in the brand voice:
 
-**The creator's handle comes from the THREAD NAME, nothing else**: the thread is named
-`welcome-<username>`, so thread `welcome-jane77` → handle `@jane77`. Never use their display
-name — display names don't match the store record and create phantom rows.
+1. What the key channels are for — clickable `<#id>` tags from the SOUL Channel directory,
+   just the three or four that matter to someone brand new.
+2. How to request samples / join campaigns — ground in `get-knowledge` (samples section).
+3. **What's actually running right now** — ground in `get-campaigns`, never boilerplate.
+4. How to get help: ask Ace in the community channel, the team for anything creative.
+5. A nudge to introduce themselves.
 
-**Pacing — the #1 rule: ONE short message per turn.** A sentence or two plus a single
-question. Never several messages in a row, never walls of text, never bullet-dumps while
-collecting info. Run at most the one or two scripts a step needs, then answer — a fast short
-reply beats a thorough slow one. You should NOT need `status` on every message: the thread is
-your conversation history; run `status` only on your first turn in a thread or when unsure.
-
-**The scripts do the judging, you do the talking.** Pass the creator's answer through — do
-NOT decide yourself whether it's a valid handle, whether "nah" means skip, or whether
-they've had too many tries. `set` answers all of that and returns a verdict.
-
-**Exactly ONE `set` call per creator message.** If they wrote a sentence
-("my tiktok is @javarisjavar"), pull out the answer and pass just that. If it still comes
-back invalid, that is your answer — re-ask, don't try a second `set` with a different guess.
-Never call `set` twice in a turn, and never re-check `status` after it.
+**The community home is `#community-chat`** — every "come hang out / say hi" pointer goes
+THERE, never `#general`, unless the brand's config says otherwise. Then stamp it (this
+starts the 48h clock):
 
 ```
-python ${HERMES_SKILL_DIR}/scripts/onboarding.py set --handle "@<username>" --tiktok "<exactly what they typed>"
+python ${HERMES_SKILL_DIR}/scripts/onboarding.py guided --handle "@<username>"
 ```
-
-- `{"ok": true, ...}` → saved. Move to the next question. `"skipped": ["email"]` means they
-  declined that one; acknowledge lightly and move on, never push back.
-- `{"ok": false, "reason": "..."}` → re-ask ONCE, warmly and concretely, using the reason:
-  `not_a_handle` (ask for just the @name they post under), `looks_like_email` (that's their
-  email, you want the TikTok name), `not_an_email`, `not_a_phone`, `blank`,
-  `required` (they tried to skip TikTok — say you do need this one, it's the only one).
-- `{"limit_reached": true}` → **stop asking.** They're already flagged and the team is
-  already pinged. Tell them warmly that someone from the team will finish this with them,
-  and end the turn. Do not re-ask, do not run anything else.
-
-**Never narrate the plumbing.** Not what the welcome message did, not what `status` said,
-not that they're "new in the system", not that a script failed. Talk to them like a person
-who already knows why they're here. "Alright, John! I can see you're brand new here. The
-welcome message should have already asked, but just to kick things off —" is exactly the
-tone to avoid: it explains the machine instead of asking the question.
-
-Check where they are ONLY when you're genuinely unsure (a resumed or reopened thread):
-`python ${HERMES_SKILL_DIR}/scripts/onboarding.py status --handle "@<username>"`
-(if there's no record yet, `start` one). In a fresh thread you already know where they are:
-the welcome asked for TikTok, so their first message is a TikTok answer — pass it to `set`
-and skip `status` entirely. Then continue from the first missing piece:
-
-1. **TikTok username** (required) — the welcome message already asked for it, so your first
-   reply reacts to their answer. Never re-introduce yourself or re-ask from scratch.
-2. **Email** (OPTIONAL). Ask like: "What's the best email to reach you? If you prefer not to
-   share, just say \"skip\"."
-3. **WhatsApp / phone number** (OPTIONAL). Ask like: "Last one — what's your WhatsApp or
-   phone number? If you prefer not to share, just say \"skip\"."
-4. **Complete** (TikTok collected; email/phone may be skipped). ONE command — it assigns
-   every role in `ace.onboarding.creator_roles` (default `onboarded` + `creator`, Vaulty
-   parity), then posts their details to the team's **#ace-onboarding** Slack channel:
-   ```
-   python ${HERMES_SKILL_DIR}/scripts/onboarding.py complete --handle "@<username>"
-   ```
-   You never need their Discord ID — the script reads it from the record the join tick
-   wrote. Do not call `assign_role.py` yourself.
-   - `{"ok": true}` → they're in. Go straight to guidance.
-   - `{"ok": false, "needs_team": true}` → role assignment failed, which means they're
-     still locked out of the server. The team has ALREADY been paged with the error
-     (`team_notified`). Tell the creator warmly that someone's finishing their access and
-     end the turn. Don't retry it, and don't paste the error to them.
-5. **Guidance sequence** — ONE friendly message, in the brand voice, covering in order:
-   1. What the key channels are for (use clickable `<#id>` tags from the SOUL Channel directory;
-      just the few that matter to someone brand new).
-   2. How to request samples / join campaigns — ground in `get-knowledge` (samples section).
-   3. **What's actually running right now** — ground in `get-campaigns` (never boilerplate).
-   4. How to get help: ask Ace in the community channel, or the team for anything creative.
-   5. A nudge to introduce themselves in the community channel.
-   **The community home is `#community-chat`** (clickable tag from the Channel directory) —
-   every "come hang out / say hi / ask questions" pointer goes THERE. Never point creators
-   to `#general` unless the brand's config explicitly says otherwise.
-   Then stamp it — the 48h clock starts here:
-   ```
-   python ${HERMES_SKILL_DIR}/scripts/onboarding.py guided --handle "@<username>"
-   ```
 
 ## Nudge mode (woken by the tick with `onboarding_nudges_due`)
 
@@ -118,38 +81,39 @@ No guilt-tripping. Deliver per `nudge_via`:
 End your turn with only `[SILENT]`.
 
 ## Pitfalls
-- **NEVER create cron jobs from an onboarding conversation** — no "check later" jobs, no
-  running scripts via cron as a workaround. Cron deliveries leak into the creator's thread
-  as raw "Cronjob Response" spam. If a script fails, run it once more; if it still fails,
-  post the exact error to Slack (`_lib/slack_cli.py`), tell the creator the team will finish
-  their setup, and END the turn. A short clean failure beats a long improvised one.
-- **NEVER edit skills or write new ones**, and never invent a workaround procedure when a
-  script fails. The bundle is read-only by design and managed from git. A QA session that
-  hit a blocked script wrote itself a skill called `onboarding-scripts-fallback` telling
-  future sessions to reconstruct creator data from memory instead of running the scripts —
-  which is exactly how creator data gets silently lost. If a script is broken, say so and
-  stop; a human fixes it in git.
-- **Every extra tool call is seconds of creator-visible latency.** Aim for at most 1–2 script
-  runs per reply, then answer. Don't re-read files or re-check state you already have. The
-  skill text is already in this session — never re-read it mid-conversation.
-- Keep turns short — one question or one step per message. No status chatter, no walls of text.
-- The tick already marked them nudged when it woke you — deliver every nudge you were handed;
-  if delivery fails both ways, post the failure to Slack instead of dropping it.
-- `complete` fails without a TikTok username — that's the guard, not an error to work around.
-  Email and phone are optional ("skip" is a first-class answer, never argued with).
-- Retries are per-creator and cumulative across all fields — the limit is a total patience
-  budget, not per-field. A "skip" is NOT a retry. `set` counts them for you; you do not need
-  to call `retry` yourself.
-- Never re-run the full flow for someone whose `status` is already `guided`/`active` — answer
-  whatever they asked instead (a duplicate join resumes, never restarts).
-- **Rejoins restart automatically**: anyone who left the server and comes back gets a fresh
-  thread + welcome-back from the tick, with timers reset but their TikTok/email remembered —
-  if `status` shows those already set, skip straight to role assignment and guidance.
+
+- **Never narrate the plumbing.** Not what the welcome message did, not what a script
+  returned, not that they're "new in the system", not that a step failed. This actual QA
+  reply is the tone to avoid: *"Hey John! Welcome to the thread 👋 It looks like the welcome
+  message already asked — so just to kick things off, what's your TikTok username?"* — it
+  explains the machine to someone who just wants to be asked a question.
+- **One short message per turn.** A sentence or two and a single question. Never several
+  messages in a row, never walls of text, never bullet-dumps while collecting.
+- **Every extra tool call is seconds of creator-visible latency.** One script per reply,
+  then answer. The skill text is already in this session — never re-read it mid-conversation.
+- **NEVER create cron jobs from an onboarding conversation.** Cron deliveries leak into the
+  creator's thread as raw "Cronjob Response" spam. If a script fails, run it once more; if it
+  still fails, post the exact error to Slack (`_lib/slack_cli.py`), tell the creator the team
+  will finish their setup, and END the turn. A short clean failure beats a long improvised one.
+- **NEVER edit skills or write new ones**, and never invent a workaround when a script fails.
+  The bundle is read-only by design and managed from git. A QA session that hit a blocked
+  script wrote itself a skill called `onboarding-scripts-fallback` telling future sessions to
+  reconstruct creator data from memory instead of running the scripts — exactly how creator
+  data gets silently lost. If a script is broken, say so and stop; a human fixes it in git.
+- "skip" is a first-class answer on email and phone, never argued with and never a retry.
+  TikTok is the one field they can't skip.
+- Never re-run the flow for someone already `guided`/`active` — answer whatever they asked
+  instead. A duplicate join resumes, never restarts.
+- **Rejoins restart automatically**: anyone who left and came back gets a fresh thread and
+  welcome-back from the tick, timers reset but their details remembered — `answer` picks up
+  wherever they actually are.
 - Escalations (7-day quiet) are the tick's job, not yours — don't nudge anyone twice.
 - Don't dump every channel in guidance; three or four that matter beat eleven.
 
 ## Verification
-- The creator record walks new → collecting → complete (role set) → guided, with retries counted.
+
+- The creator record walks new → collecting → complete (roles set) → guided, retries counted.
+- One script call per creator message, and no message that mentions a script or a state.
 - Guidance references the actual live campaign and clickable channel tags.
 - A failed role assignment produces a creator-facing note + a Slack alert, never silence.
 - Nudges are one line, one concrete step, delivered by DM with thread fallback.

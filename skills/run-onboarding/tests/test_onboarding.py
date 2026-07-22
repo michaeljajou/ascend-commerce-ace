@@ -325,6 +325,92 @@ def test_failed_role_assignment_blocks_completion_and_pages_the_team(conn, monke
     assert any("role assignment failed" in text for _key, text in offline)
 
 
+# --- `answer` drives the whole flow so the agent never picks the step -------------------
+
+
+def test_the_screenshot_bug_a_valid_first_answer_is_saved_not_re_asked(conn):
+    """QA, 2026-07-22: the welcome asked for TikTok, the creator replied "bigjohn123", and
+    Ace greeted them and asked for their TikTok again — running zero scripts. On a thread's
+    first turn the gateway prepends the whole skill doc to their message, so a one-word
+    answer arrives buried under a procedure and the model starts the procedure."""
+    onboarding.start(conn, "@john", now=100.0)
+    out = onboarding.answer(conn, "@john", "bigjohn123", now=200.0)
+
+    assert out["ok"] is True
+    assert onboarding.status(conn, "@john")["tiktok"] == "bigjohn123"
+    assert out["ask"] == "email"                  # the script picks the next step, not the agent
+    assert "email" in out["question"]
+
+
+def test_answer_walks_the_whole_flow_and_finishes_by_itself(conn, offline):
+    onboarding.start(conn, "@ava", now=100.0)
+    store.update_onboarding(conn, "@ava", discord_id="42")
+
+    first = onboarding.answer(conn, "@ava", "@ava.tt")
+    assert first["ask"] == "email"
+
+    second = onboarding.answer(conn, "@ava", "ava@example.com")
+    assert second["ask"] == "phone"
+
+    last = onboarding.answer(conn, "@ava", "skip")
+    assert last["ask"] is None                    # nothing left to ask
+    assert last["state"] == onboarding.COMPLETE   # roles + Slack happened without a second call
+    assert last["next_step"] == "guidance"
+    assert last["posted_to_slack"] is True
+
+
+def test_a_declined_field_is_never_asked_again(conn, offline):
+    """A NULL email means 'not asked yet'; without recording the decline the flow loops."""
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.answer(conn, "@ava", "ava.tt")
+    out = onboarding.answer(conn, "@ava", "skip")          # declines email
+
+    assert out["declined"] == "email"
+    assert out["ask"] == "phone"                            # moved on, not re-asking email
+    assert onboarding.status(conn, "@ava")["declined"] == ["email"]
+
+
+def test_answer_re_asks_the_same_field_on_junk(conn):
+    onboarding.start(conn, "@ava", now=100.0)
+    out = onboarding.answer(conn, "@ava", "welcome-john-2029")
+    assert out["ok"] is False
+    assert out["ask"] == "tiktok"                           # same field, not the next one
+    assert out["hint"] and out["retries"] == 1
+    assert onboarding.status(conn, "@ava")["tiktok"] is None
+
+
+def test_answer_stops_asking_once_patience_runs_out(conn, offline):
+    onboarding.start(conn, "@ava", now=100.0)
+    for _ in range(2):
+        onboarding.answer(conn, "@ava", "!!!")
+    out = onboarding.answer(conn, "@ava", "!!!")
+    assert out["limit_reached"] is True
+    assert out["ask"] is None                               # nothing more to ask them
+    assert out["team_notified"] is True
+
+
+def test_answer_starts_a_record_for_an_unknown_creator(conn):
+    """A thread can outlive its row (manual DB edits, a wiped store) — don't crash."""
+    out = onboarding.answer(conn, "@ghost", "ghost.tt", now=100.0)
+    assert out["ok"] is True and out["ask"] == "email"
+
+
+def test_answer_on_an_already_finished_creator_does_not_redo_collection(conn, offline):
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.set_fields(conn, "@ava", tiktok="ava.tt", email="a@x.com", phone="+1 555 010 0100")
+    out = onboarding.answer(conn, "@ava", "thanks!")
+    assert out["ask"] is None and out["state"] == onboarding.COMPLETE
+
+
+def test_one_bad_field_does_not_discard_the_good_ones_beside_it(conn):
+    """set_fields used to bail on the first invalid field, silently dropping values the
+    creator had already given correctly in the same call."""
+    onboarding.start(conn, "@ava", now=100.0)
+    out = onboarding.set_fields(conn, "@ava", tiktok="ava.tt", phone="banana")
+    assert out["ok"] is False and out["field"] == "phone"
+    assert onboarding.status(conn, "@ava")["tiktok"] == "ava.tt"      # kept
+
+
 def test_missing_discord_id_is_a_clean_failure_not_a_crash(monkeypatch):
     monkeypatch.undo()                                 # exercise the real assign()
     out = assign_role.assign("")                       # no id on record

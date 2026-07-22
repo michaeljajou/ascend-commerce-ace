@@ -114,6 +114,10 @@ ONBOARDING_MIGRATIONS = [
     "ALTER TABLE creators ADD COLUMN escalation_ts TEXT",      # Slack message ts (✅ resolve poll)
     "ALTER TABLE creators ADD COLUMN resolved_at TEXT",
     "ALTER TABLE creators ADD COLUMN phone TEXT",              # optional WhatsApp/phone
+    # Which optional fields the creator declined, comma-separated. A NULL email means
+    # "not asked yet"; "email" in here means "asked, and they said skip" — without the
+    # distinction the flow cannot tell where it is and re-asks a question they answered.
+    "ALTER TABLE creators ADD COLUMN skipped_fields TEXT",
 ]
 
 

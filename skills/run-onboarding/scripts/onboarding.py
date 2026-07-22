@@ -6,19 +6,27 @@ and gives the team its controls (status / reset / resolve / test-mode / stats). 
 conversational guidance lives in the SKILL.md; this script just persists state so the
 onboarding tick, `nudge-inactive`, and the digest can use it.
 
-Flow subcommands (used by the agent in the onboarding thread):
-    python onboarding.py start    --handle @ava                     # state=collecting
-    python onboarding.py set      --handle @ava --tiktok "<what they typed>"
-    python onboarding.py set      --handle @ava --email "<what they typed>"
-    python onboarding.py complete --handle @ava                     # roles + Slack, one call
-    python onboarding.py guided   --handle @ava                     # guidance done → 48h clock starts
+The agent needs exactly ONE of these — `answer` — for the whole collection conversation:
 
-``set`` takes the creator's RAW answer and does the judging itself: it validates the
-field, recognises "skip" on the optional ones, counts a retry on junk, and flags the team
-when patience runs out. ``complete`` assigns the Discord roles and posts the signup card.
-Both return a small JSON verdict for the agent to phrase — no field rules, no Discord IDs,
-and no Slack calls live in the prompt, because every one of those the agent had to get
-right by itself is one it eventually got wrong.
+    python onboarding.py answer --handle @ava --text "<the creator's message, verbatim>"
+    python onboarding.py guided --handle @ava    # guidance delivered → 48h clock starts
+
+``answer`` works out which question is outstanding, validates the reply against it, saves
+it or counts a retry, and reports what to ask next — assigning the Discord roles and
+posting the signup card itself once nothing is left to ask. The agent supplies words and
+nothing else.
+
+That is the whole design principle here, learned one QA round at a time: every decision
+left to the agent was eventually gotten wrong. It took a Discord thread's own name as a
+TikTok handle, hunted for a Discord ID it was never given, and — with the correct
+instructions in front of it — greeted a creator and re-asked a question they had just
+answered, because a thread's first turn buries their reply under the whole skill document.
+
+The pieces `answer` composes, still available for operator repair work:
+
+    python onboarding.py start    --handle @ava                     # state=collecting
+    python onboarding.py set      --handle @ava --tiktok "<raw>"    # one field, validated
+    python onboarding.py complete --handle @ava                     # roles + Slack
 
 Team subcommands (via admin-commands, or the CLI directly):
     python onboarding.py status   --handle @ava
@@ -135,24 +143,18 @@ def set_fields(conn, handle: str, tiktok: str | None = None, email: str | None =
     if existing is None:
         existing = Creator(handle=handle, onboarding_state=COLLECTING,
                            joined_at=str(now if now is not None else time.time()))
+    # Validate everything BEFORE writing anything, so a bad value in one field can't throw
+    # away a good value the creator gave for another in the same call.
     saved: dict[str, str] = {}
     skipped: list[str] = []
+    failure: tuple[str, str, str] | None = None       # (field, reason, raw)
     for field, raw in (("tiktok", tiktok), ("email", email), ("phone", phone)):
         if raw is None:
             continue
         value, reason = normalize(field, raw)
         if reason:
-            bumped = retry(conn, handle, ensure=existing)
-            limit = max_retries()
-            out = {"ok": False, "handle": handle, "field": field, "reason": reason,
-                   "retries": bumped["retries"], "max_retries": limit,
-                   "limit_reached": bumped["retries"] >= limit}
-            if out["limit_reached"]:
-                out.update(flag(conn, handle))
-                out["team_notified"] = post_stuck(
-                    store.get_onboarding(conn, handle) or {}, field, raw)
-            return out
-        if value:
+            failure = failure or (field, reason, raw)
+        elif value:
             saved[field] = value
         else:
             skipped.append(field)
@@ -166,10 +168,106 @@ def set_fields(conn, handle: str, tiktok: str | None = None, email: str | None =
     store.mark_active(conn, handle, ts=now)
     if saved.get("phone"):
         store.update_onboarding(conn, handle, phone=saved["phone"])
+
+    if failure:
+        field, reason, raw = failure
+        bumped = retry(conn, handle, ensure=existing)
+        limit = max_retries()
+        out = {"ok": False, "handle": handle, "field": field, "reason": reason,
+               "retries": bumped["retries"], "max_retries": limit,
+               "limit_reached": bumped["retries"] >= limit}
+        if out["limit_reached"]:
+            out.update(flag(conn, handle))
+            out["team_notified"] = post_stuck(
+                store.get_onboarding(conn, handle) or {}, field, raw)
+        return out
+
     row = store.get_onboarding(conn, handle) or {}
     return {"ok": True, "handle": handle, "skipped": skipped,
             "tiktok": row.get("tiktok"), "email": row.get("email"), "phone": row.get("phone"),
             "still_needed": [] if row.get("tiktok") else ["tiktok"]}
+
+
+# The collection order. `answer` walks this, so the agent never decides which question it
+# is on — a decision it got wrong in QA by greeting and re-asking a question the welcome
+# message had already asked and the creator had already answered.
+FIELD_ORDER = ("tiktok", "email", "phone")
+FIELD_PROMPTS = {
+    "tiktok": "what's your TikTok username",
+    "email": 'what\'s the best email to reach you — if you prefer not to share, just say "skip"',
+    "phone": 'what\'s your WhatsApp or phone number — if you prefer not to share, just say "skip"',
+}
+RETRY_HINTS = {
+    "not_a_handle": "ask for just the @name they post under, nothing else",
+    "looks_like_email": "that's their email; you want the TikTok name",
+    "not_an_email": "ask for an email address",
+    "not_a_phone": "ask for a phone number with digits",
+    "blank": "they sent nothing usable; ask again warmly",
+    "required": "TikTok is the one thing you do need; say so kindly",
+}
+
+
+def skipped_fields(row: dict) -> list[str]:
+    return [f for f in (row.get("skipped_fields") or "").split(",") if f]
+
+
+def next_field(row: dict) -> str | None:
+    """The field still outstanding, or None when everything has been asked."""
+    declined = skipped_fields(row)
+    for field in FIELD_ORDER:
+        if not row.get(field) and field not in declined:
+            return field
+    return None
+
+
+def answer(conn, handle: str, text: str, now: float | None = None) -> dict:
+    """Take the creator's raw message and drive the whole collection flow one step.
+
+    This is THE command for a creator's message. It works out which question is
+    outstanding, validates their answer against it, records it (or counts a retry), and
+    reports what to ask next — finishing onboarding outright once nothing is left.
+
+    It exists because the agent kept getting the "which step am I on" decision wrong. On a
+    thread's first turn the gateway prepends the whole skill document to the creator's
+    message, so a one-word answer arrives buried under a procedure, and the model's
+    instinct is to start the procedure rather than answer it. No amount of prompt wording
+    beat that; removing the decision does.
+    """
+    row = store.get_onboarding(conn, handle)
+    if row is None:
+        start(conn, handle, now=now)
+        row = store.get_onboarding(conn, handle) or {}
+
+    field = next_field(row)
+    if field is None:
+        return _finish(conn, handle, now)
+
+    result = set_fields(conn, handle, now=now, **{field: text})
+    if not result["ok"]:
+        result["ask"] = None if result.get("limit_reached") else field
+        result["hint"] = RETRY_HINTS.get(result.get("reason"), "ask again warmly")
+        result["question"] = FIELD_PROMPTS[field]
+        return result
+
+    if field in result.get("skipped", []):
+        store.update_onboarding(
+            conn, handle,
+            skipped_fields=",".join(skipped_fields(row) + [field]),
+        )
+        result["declined"] = field
+
+    row = store.get_onboarding(conn, handle) or {}
+    upcoming = next_field(row)
+    if upcoming is None:
+        return {**result, **_finish(conn, handle, now)}
+    return {**result, "ask": upcoming, "question": FIELD_PROMPTS[upcoming]}
+
+
+def _finish(conn, handle: str, now: float | None) -> dict:
+    """Everything asked — assign roles and hand the details to the team."""
+    done = complete(conn, handle, now=now)
+    return {**done, "ask": None,
+            "next_step": "guidance" if done.get("ok") else "hand off to the team"}
 
 
 def retry(conn, handle: str, ensure: Creator | None = None) -> dict:
@@ -331,11 +429,14 @@ def status(conn, handle: str) -> dict:
     row = store.get_onboarding(conn, handle)
     if row is None:
         return {"handle": handle, "state": None, "error": "not found"}
-    return {k: row.get(k) for k in (
+    out = {k: row.get(k) for k in (
         "handle", "onboarding_state", "tiktok", "email", "phone", "role", "retries",
         "joined_at", "guided_at", "nudged_at", "escalated_at", "resolved_at",
         "last_active_at", "thread_id",
     )}
+    out["declined"] = skipped_fields(row)
+    out["ask"] = next_field(row)
+    return out
 
 
 def reset(conn, handle: str, now: float | None = None) -> dict:
@@ -376,9 +477,12 @@ def set_test_mode(profile_dir: Path, on: bool) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Creator onboarding state + team controls.")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("start", "set", "retry", "complete", "guided", "flag", "status", "reset", "resolve"):
+    for name in ("start", "answer", "set", "retry", "complete", "guided", "flag", "status",
+                 "reset", "resolve"):
         p = sub.add_parser(name)
         p.add_argument("--handle", required=True)
+        if name == "answer":
+            p.add_argument("--text", required=True, help="the creator's message, verbatim")
         if name == "set":
             p.add_argument("--tiktok")
             p.add_argument("--email")
@@ -398,6 +502,7 @@ def main(argv: list[str] | None = None) -> int:
     conn = store.connect()
     handlers = {
         "start": lambda: start(conn, args.handle),
+        "answer": lambda: answer(conn, args.handle, args.text),
         "set": lambda: set_fields(conn, args.handle, args.tiktok, args.email, args.phone),
         "retry": lambda: retry(conn, args.handle),
         "complete": lambda: complete(conn, args.handle, args.role),
