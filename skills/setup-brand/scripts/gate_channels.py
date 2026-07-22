@@ -184,6 +184,29 @@ def main(argv: list[str] | None = None) -> int:
     targets = gate_targets(channels, onboarding_id)
     leaks = leaky_channels(channels, guild_id, onboarding_id)
     verb = "OPEN" if args.open else "GATE"
+
+    # Pre-flight: a category that already denies @everyone View, with no explicit allow
+    # for the bot's role, is one the bot can no longer manage (Discord resolves Manage
+    # Roles through the same overwrite chain). Writing the gate and the bot's allow in
+    # the SAME patch avoids this on a fresh server; a server already in that state has
+    # to be repaired by hand, so say so loudly instead of emitting bare 403s.
+    fenced = []
+    for c in targets:
+        ows = {o["id"]: o for o in c.get("permission_overwrites", [])}
+        everyone_denies = int(ows.get(guild_id, {}).get("deny", 0)) & VIEW_CHANNEL
+        bot_allowed = bot_role_id and int(ows.get(bot_role_id, {}).get("allow", 0)) & VIEW_CHANNEL
+        if everyone_denies and not bot_allowed:
+            fenced.append(c)
+    if fenced:
+        print("ERROR: the bot cannot manage these — they deny @everyone View Channel and "
+              "have no explicit allow for the bot's own role:", file=sys.stderr)
+        for c in fenced:
+            print(f"  #{c.get('name')}", file=sys.stderr)
+        print("Fix in Discord (Edit Channel/Category → Permissions → add the bot's role → "
+              "allow View Channel), then re-run. Until then the gate stays as-is and Ace "
+              "keeps working; only gate changes are blocked.", file=sys.stderr)
+        if args.apply:
+            return 1
     changed = 0
     for channel in sorted(targets, key=lambda c: c.get("position", 0)):
         desired = plan_overwrites(channel, guild_id=guild_id, creator_role_ids=creator_role_ids,

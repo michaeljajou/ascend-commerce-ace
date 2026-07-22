@@ -82,3 +82,11 @@ def test_leaky_child_channels_are_detected():
     ]
     leaks = [c["name"] for c in gate.leaky_channels(channels, GUILD, ONBOARDING)]
     assert leaks == ["leaky"]                      # onboarding is meant to be open
+
+
+def test_bot_allow_and_everyone_deny_land_in_one_patch():
+    """On a fresh server the gate and the bot's own allow are written together, so the
+    bot can never fence itself out of the category it just gated."""
+    out = by_id(plan({"id": "cat1", "name": "Text Channels", "permission_overwrites": []}))
+    assert out[GUILD] == (0, gate.VIEW_CHANNEL)
+    assert out[BOT] == (gate.VIEW_CHANNEL, 0)          # same patch, no lockout window
