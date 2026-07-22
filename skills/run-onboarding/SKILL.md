@@ -35,42 +35,47 @@ collecting info. Run at most the one or two scripts a step needs, then answer �
 reply beats a thorough slow one. You should NOT need `status` on every message: the thread is
 your conversation history; run `status` only on your first turn in a thread or when unsure.
 
-Check where they are first (first turn only): `python ${HERMES_SKILL_DIR}/scripts/onboarding.py status --handle "@<username>"`
+**The scripts do the judging, you do the talking.** Pass the creator's answer through
+verbatim — do NOT decide yourself whether it's a valid handle, whether "nah" means skip, or
+whether they've had too many tries. `set` answers all of that and returns a verdict:
+
+```
+python ${HERMES_SKILL_DIR}/scripts/onboarding.py set --handle "@<username>" --tiktok "<exactly what they typed>"
+```
+
+- `{"ok": true, ...}` → saved. Move to the next question. `"skipped": ["email"]` means they
+  declined that one; acknowledge lightly and move on, never push back.
+- `{"ok": false, "reason": "..."}` → re-ask ONCE, warmly and concretely, using the reason:
+  `not_a_handle` (ask for just the @name they post under), `looks_like_email` (that's their
+  email, you want the TikTok name), `not_an_email`, `not_a_phone`, `blank`,
+  `required` (they tried to skip TikTok — say you do need this one, it's the only one).
+- `{"limit_reached": true}` → **stop asking.** They're already flagged and the team is
+  already pinged. Tell them warmly that someone from the team will finish this with them,
+  and end the turn. Do not re-ask, do not run anything else.
+
+Check where they are first (**first turn only**):
+`python ${HERMES_SKILL_DIR}/scripts/onboarding.py status --handle "@<username>"`
 (if there's no record yet, `start` one). Then continue from the first missing piece:
 
-1. **TikTok username** (required). Valid: a plausible TikTok handle (1–24 chars; letters,
-   digits, `_`, `.`; with or without a leading @; also accept a tiktok.com profile URL and
-   extract the handle). Invalid (blank, "idk", an email, obvious junk) → count it and re-ask
-   with a clarifying prompt:
-   ```
-   python ${HERMES_SKILL_DIR}/scripts/onboarding.py retry --handle "@<username>"
-   ```
-   When `retries` reaches `ace.onboarding.max_retries` (default 3): STOP looping — flag it
-   (`onboarding.py flag`), post to the team Slack via `_lib/slack_cli.py` (who, which field,
-   what they said), and tell the creator warmly that a team member will take it from here.
-   Valid → save: `onboarding.py set --handle "@<username>" --tiktok "<handle>"`
+1. **TikTok username** (required) — the welcome message already asked for it, so your first
+   reply should react to their answer, not re-introduce yourself.
 2. **Email** (OPTIONAL). Ask like: "What's the best email to reach you? If you prefer not to
-   share, just say \"skip\"." — "skip" (or any clear decline) moves straight on, no pushback.
-   A real answer must look like an email; junk → same retry logic.
-   Valid → save: `onboarding.py set --handle "@<username>" --email "<email>"`
+   share, just say \"skip\"."
 3. **WhatsApp / phone number** (OPTIONAL). Ask like: "Last one — what's your WhatsApp or
-   phone number? If you prefer not to share, just say \"skip\"." Same skip rule. A real
-   answer should look like a phone number (digits, spaces, +, dashes).
-   Valid → save: `onboarding.py set --handle "@<username>" --phone "<number>"`
-4. **Role assignment** (TikTok collected; email/phone may be skipped). `assign_role.py`
-   assigns every role in `ace.onboarding.creator_roles` (default: `onboarded` + `creator` —
-   Vaulty parity):
+   phone number? If you prefer not to share, just say \"skip\"."
+4. **Complete** (TikTok collected; email/phone may be skipped). ONE command — it assigns
+   every role in `ace.onboarding.creator_roles` (default `onboarded` + `creator`, Vaulty
+   parity), then posts their details to the team's **#ace-onboarding** Slack channel:
    ```
-   python ${HERMES_SKILL_DIR}/scripts/assign_role.py --user-id <discord_id>
-   python ${HERMES_SKILL_DIR}/scripts/onboarding.py complete --handle "@<username>" --role creator
+   python ${HERMES_SKILL_DIR}/scripts/onboarding.py complete --handle "@<username>"
    ```
-   If `assign_role.py` exits non-zero: **never fail silently** — this blocks their channel
-   access (with the access gate on, those roles ARE their key to the server). Tell the
-   creator the team's been looped in to finish their access, AND post the script's error to
-   Slack (`slack_cli.py`) immediately. Do not mark complete.
-   `complete` also posts their captured details (TikTok + contact) to the team's
-   **#ace-onboarding** Slack channel automatically — nothing for you to do, and a Slack
-   outage is reported without blocking the creator.
+   You never need their Discord ID — the script reads it from the record the join tick
+   wrote. Do not call `assign_role.py` yourself.
+   - `{"ok": true}` → they're in. Go straight to guidance.
+   - `{"ok": false, "needs_team": true}` → role assignment failed, which means they're
+     still locked out of the server. The team has ALREADY been paged with the error
+     (`team_notified`). Tell the creator warmly that someone's finishing their access and
+     end the turn. Don't retry it, and don't paste the error to them.
 5. **Guidance sequence** — ONE friendly message, in the brand voice, covering in order:
    1. What the key channels are for (use clickable `<#id>` tags from the SOUL Channel directory;
       just the few that matter to someone brand new).
@@ -105,18 +110,23 @@ End your turn with only `[SILENT]`.
   as raw "Cronjob Response" spam. If a script fails, run it once more; if it still fails,
   post the exact error to Slack (`_lib/slack_cli.py`), tell the creator the team will finish
   their setup, and END the turn. A short clean failure beats a long improvised one.
-- **NEVER edit skills** (`skill_manage`, writing to the bundle, "saving notes to the skill").
-  The bundle is read-only by design and managed from git — attempts just fail and burn the
-  creator's time. In one QA session this cost 27 failed writes and minutes of silence.
+- **NEVER edit skills or write new ones**, and never invent a workaround procedure when a
+  script fails. The bundle is read-only by design and managed from git. A QA session that
+  hit a blocked script wrote itself a skill called `onboarding-scripts-fallback` telling
+  future sessions to reconstruct creator data from memory instead of running the scripts —
+  which is exactly how creator data gets silently lost. If a script is broken, say so and
+  stop; a human fixes it in git.
 - **Every extra tool call is seconds of creator-visible latency.** Aim for at most 1–2 script
-  runs per reply, then answer. Don't re-read files or re-check state you already have.
+  runs per reply, then answer. Don't re-read files or re-check state you already have. The
+  skill text is already in this session — never re-read it mid-conversation.
 - Keep turns short — one question or one step per message. No status chatter, no walls of text.
 - The tick already marked them nudged when it woke you — deliver every nudge you were handed;
   if delivery fails both ways, post the failure to Slack instead of dropping it.
 - `complete` fails without a TikTok username — that's the guard, not an error to work around.
   Email and phone are optional ("skip" is a first-class answer, never argued with).
 - Retries are per-creator and cumulative across all fields — the limit is a total patience
-  budget, not per-field. A "skip" is NOT a retry.
+  budget, not per-field. A "skip" is NOT a retry. `set` counts them for you; you do not need
+  to call `retry` yourself.
 - Never re-run the full flow for someone whose `status` is already `guided`/`active` — answer
   whatever they asked instead (a duplicate join resumes, never restarts).
 - **Rejoins restart automatically**: anyone who left the server and comes back gets a fresh

@@ -300,10 +300,46 @@ def test_merge_config_caps_turns_and_disables_curator(tmp_path):
                    encoding="utf-8")
     setup.merge_config(cfg, make_spec())
     data = yaml.safe_load(cfg.read_text())
-    assert data["agent"]["max_turns"] == 8                  # 150 round trips -> 8
+    assert data["agent"]["max_turns"] == 12                 # 150 round trips -> 12
     assert data["agent"]["gateway_timeout"] == 900          # other agent keys preserved
     assert data["curator"]["enabled"] is False              # no background skill rewrites
     assert data["curator"]["interval_hours"] == 168         # rest of curator config intact
+
+
+def test_the_agent_can_never_write_itself_a_skill(tmp_path):
+    """QA regression, 2026-07-22: after one onboarding, Hermes' background review wrote a
+    skill instructing future sessions to skip the scripts and rebuild creator data from
+    memory, then announced it in the creator's thread. `skill_manage` being in the toolset
+    is the ONLY trigger for that review, so the fix is to not ship it."""
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({
+        "platform_toolsets": {"discord": ["code_execution", "skills", "file"]},
+        "skills": {"external_dirs": ["/opt/data/ascend-commerce-ace/skills"],
+                   "creation_nudge_interval": 10},
+        "memory": {"nudge_interval": 10, "memory_enabled": True},
+    }), encoding="utf-8")
+    setup.merge_config(cfg, make_spec())
+    data = yaml.safe_load(cfg.read_text())
+
+    assert "skills" not in data["platform_toolsets"]["discord"]
+    assert data["skills"]["creation_nudge_interval"] == 0
+    assert data["memory"]["nudge_interval"] == 0
+    assert data["display"]["memory_notifications"] == "off"   # no 💾 summaries in chat
+    # The skill search path is Hermes' own key and must survive the hardening pass.
+    assert data["skills"]["external_dirs"] == ["/opt/data/ascend-commerce-ace/skills"]
+    assert data["memory"]["memory_enabled"] is True
+
+
+def test_turn_cap_leaves_headroom_for_the_budget_notice(tmp_path):
+    """Discord has no suppression for '⚠️ Iteration budget exhausted (n/n)' — the gateway's
+    status filter is Telegram-only — so the cap must sit above what a real turn costs."""
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    setup.merge_config(cfg, make_spec())
+    assert yaml.safe_load(cfg.read_text())["agent"]["max_turns"] >= 12
 
 
 def test_build_onboarding_carries_sheet_webhook():

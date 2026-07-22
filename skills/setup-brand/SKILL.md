@@ -100,7 +100,20 @@ there is no ingest/embedding step.
    identified by the **"Ascend Team"** Discord role — the default in every brand; override
    with `discord.team_role` in the spec. Role-holders are never swept, and their reply
    within the grace window, default 5 min, releases Ace from answering.)
-3a. **Security hardening is applied automatically** by `setup.py` on every run: `approvals.mode: smart`, `code_execution.mode: strict`, a `command_allowlist` scoped to this brand's own scripts, `session_reset: idle` (60 min), the `terminal` tool stripped from the brand's `discord`/`cli` platform toolsets, and `display.tool_progress: off` / `interim_assistant_messages: false` so no tool chatter leaks into Discord. Do not hand-edit these away without discussing with the operator — the next `setup-brand` re-run restores them.
+3a. **Security hardening is applied automatically** by `setup.py` on every run: `approvals.mode: smart`, `approvals.cron_mode: approve`, `code_execution.mode: strict`, a `command_allowlist` scoped to this brand's own scripts, `session_reset: idle` (60 min), the brand's Discord toolset reduced to `code_execution` + `file` + `vision`, both background-review nudges off (`skills.creation_nudge_interval: 0`, `memory.nudge_interval: 0`), and every `display.*` chatter channel silenced so nothing operational leaks into Discord. Do not hand-edit these away without discussing with the operator — the next `setup-brand` re-run restores them.
+
+   Two of these have bitten us and are worth knowing by name. `cron_mode` must never be
+   `deny`: it blocks `execute_code` outright, and since every Ace skill runs a script, the
+   agent keeps chatting while nothing is recorded. And `skills` must stay OUT of the Discord
+   toolset: `skill_manage` is the sole trigger for Hermes' background self-improvement
+   review, which once wrote a skill telling future sessions to skip the scripts and
+   reconstruct creator data from memory. The bound skill is injected by the channel binding,
+   so the agent needs no skill tool to read it.
+
+   **Agent-authored skills are a bug, not an asset.** If `<profile>/skills/` contains a
+   directory whose `SKILL.md` frontmatter has an `author` other than `Ascend Commerce`,
+   delete it — it was written by a background review working around a broken script, and it
+   encodes the workaround as doctrine.
 3b. **First connect, then resolve channels.** Discord channel IDs don't exist until the bot connects once. Run `hermes --profile <brand_id> gateway run`, confirm "Channel directory built: N target(s)" with N > 0 in the logs, stop it, then run:
     ```
     python /opt/data/ascend-commerce-ace/skills/setup-brand/scripts/resolve_channels.py --profile-dir <profile_dir>

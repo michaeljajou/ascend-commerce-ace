@@ -267,7 +267,7 @@ def ensure_env(profile_dir: str | Path, updates: dict[str, str]) -> str:
 
 
 # The complete creator-facing Discord toolset (allow-list — see _apply_security_defaults).
-BRAND_DISCORD_TOOLSET = ["code_execution", "file", "skills", "vision"]
+BRAND_DISCORD_TOOLSET = ["code_execution", "file", "vision"]
 
 # Security hardening baseline applied to EVERY brand profile. These are forced
 # (not setdefault) because they are the security posture, not a per-brand style
@@ -337,14 +337,28 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path") ->
 
     # The brand's creator-facing Discord toolset is an ALLOW-list, not a subtraction:
     # every extra tool is another LLM round trip the agent might spend, and each round
-    # trip is 5–45s of creator-visible latency. These four cover every Ace flow —
-    # scripts (code_execution), skill loading (skills), the odd file read (file), and
-    # creator screenshots (vision). Everything else is removed on purpose:
+    # trip is 5–45s of creator-visible latency. These three cover every Ace flow —
+    # scripts (code_execution), the odd file read (file), and creator screenshots
+    # (vision). Everything else is removed on purpose:
+    #   skills               — see below; the biggest single source of QA failures
     #   terminal/browser/web — shell + open internet: security and fabrication risk
     #   clarify              — emits "Hermes needs your input" and BLOCKS the turn
     #   cronjob              — a flailing agent self-scheduled jobs that spammed a thread
     #   delegation           — subagent spawning: the 6-minute replies
     #   memory/todo/session_search/tts — unused here; each is a wasted round trip
+    #
+    # On `skills` (= skill_list + skill_view + skill_manage). The bound skill is already
+    # injected into the session by the gateway's channel binding, so the agent needs no
+    # tool to read it — but having the toolset cost us three separate ways:
+    #   1. skill_manage in the toolset is the ONLY trigger for Hermes' background
+    #      "self-improvement review". After one QA onboarding it wrote a skill named
+    #      `onboarding-scripts-fallback` telling future sessions to skip the scripts and
+    #      reconstruct creator data from memory — precisely the failure mode this whole
+    #      bundle exists to prevent — and announced it in the creator's thread.
+    #   2. skill_view re-reads the skill mid-turn: 3 calls and ~42k characters in one
+    #      reply, which is what actually exhausted the iteration budget.
+    #   3. skill_manage writes against the root-owned bundle fail: 27 PermissionErrors
+    #      in a single session, minutes of silence for the creator.
     platform_toolsets = existing.setdefault("platform_toolsets", {})
     platform_toolsets["discord"] = BRAND_DISCORD_TOOLSET
     cli = platform_toolsets.get("cli")
@@ -352,14 +366,25 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path") ->
         cli = []
     platform_toolsets["cli"] = [t for t in cli if t not in {"terminal", "clarify"}]
 
+    # Belt and braces on the two background review forks. Dropping `skills`/`memory` from
+    # the Discord toolset already stops both from firing there, but a CLI session or a
+    # future toolset edit would re-arm them; 0 disables the nudge outright.
+    existing.setdefault("skills", {})["creation_nudge_interval"] = 0
+    existing.setdefault("memory", {})["nudge_interval"] = 0
+
     # Latency ceiling. Hermes defaults to 150 sequential tool round trips per reply;
     # a creator-facing support bot needs ~2. Measured in QA: one onboarding reply
     # burned 17 round trips over 6 minutes (mostly the agent retrying skill edits).
-    # This caps the worst case at seconds, not minutes.
+    #
+    # Headroom matters as much as the cap: when a turn DOES exhaust the budget, Hermes
+    # posts "⚠️ Iteration budget exhausted (n/n)" straight into the chat, and the Discord
+    # adapter has no suppression for it (the status filter is Telegram-only). So the cap
+    # has to sit far enough above the real cost of a turn that creators never see it.
+    # With `skills` gone the worst real onboarding turn is ~4 calls; 12 leaves 3x margin.
     agent_cfg = existing.setdefault("agent", {})
-    agent_cfg["max_turns"] = int(agent_cfg.get("max_turns") or 0) or 8
-    if agent_cfg["max_turns"] > 8:
-        agent_cfg["max_turns"] = 8
+    agent_cfg["max_turns"] = int(agent_cfg.get("max_turns") or 0) or 12
+    if agent_cfg["max_turns"] > 12:
+        agent_cfg["max_turns"] = 12
 
     # The curator is a BACKGROUND agent that periodically reviews sessions and rewrites
     # skills/memory. On a brand profile it burns LLM calls and repeatedly tries to edit
@@ -368,13 +393,15 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path") ->
     existing.setdefault("curator", {})["enabled"] = False
 
     # Zero operational chatter in creator-facing chat: no tool progress, no mid-turn
-    # notes, no file-verifier output, no turn explainers, no credits notices.
+    # notes, no file-verifier output, no turn explainers, no credits notices, and no
+    # "💾 Self-improvement review: …" summaries.
     display = existing.setdefault("display", {})
     display["tool_progress"] = "off"
     display["interim_assistant_messages"] = False
     display["file_mutation_verifier"] = False
     display["turn_completion_explainer"] = False
     display["credits_notices"] = False
+    display["memory_notifications"] = "off"
 
     # Ascend operates on US Eastern: cron schedules ("0 9 * * *" = 9 AM), log timestamps,
     # and prompt time injection all follow this. IANA zone → DST handled by Hermes.

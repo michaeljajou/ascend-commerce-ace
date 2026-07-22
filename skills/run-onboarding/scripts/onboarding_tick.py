@@ -149,6 +149,24 @@ def is_new_joiner(member: dict, known_ids: set[str], team_role_id: str | None) -
     return True
 
 
+def _quiet_since(row: dict, anchor_field: str) -> float | None:
+    """Epoch this creator last did anything we'd count as engagement.
+
+    ``last_active_at`` always wins when it is newer than the anchor: it is stamped every
+    time they answer Ace, so someone still working through the questions reads as active,
+    not as "hasn't moved since joining". Without this, a creator mid-conversation was
+    escalated to Slack as unresponsive while they were literally typing (QA, 2026-07-22).
+    """
+    stamps = [row.get(anchor_field), row.get("last_active_at")]
+    values = []
+    for s in stamps:
+        try:
+            values.append(float(s))
+        except (TypeError, ValueError):
+            continue
+    return max(values) if values else None
+
+
 def due_nudges(rows: list[dict], now: datetime, nudge_window: timedelta) -> list[dict]:
     """Quiet creators due a nudge, never nudged before:
     - guided:     the window runs from guidance completion (the normal case)
@@ -158,22 +176,26 @@ def due_nudges(rows: list[dict], now: datetime, nudge_window: timedelta) -> list
     for r in rows:
         if r["onboarding_state"] not in ("guided", "collecting") or r.get("nudged_at"):
             continue
-        anchor = r.get("guided_at") if r["onboarding_state"] == "guided" else r.get("joined_at")
-        if not anchor:
+        anchor = _quiet_since(r, "guided_at" if r["onboarding_state"] == "guided" else "joined_at")
+        if anchor is None:
             continue
-        if now - datetime.fromtimestamp(float(anchor), tz=timezone.utc) >= nudge_window:
+        if now - datetime.fromtimestamp(anchor, tz=timezone.utc) >= nudge_window:
             out.append(r)
     return out
 
 
 def due_escalations(rows: list[dict], now: datetime, escalate_window: timedelta) -> list[dict]:
-    """Still quiet after the escalation window since JOINING — whether they finished
-    guidance, got nudged, or never replied to the welcome at all (collecting)."""
+    """Still quiet after the escalation window — whether they finished guidance, got
+    nudged, or never replied to the welcome at all (collecting). The clock runs from
+    joining, but any reply to Ace resets it (see ``_quiet_since``)."""
     out = []
     for r in rows:
         if r["onboarding_state"] not in ("guided", "nudged", "collecting") or not r.get("joined_at"):
             continue
-        if now - datetime.fromtimestamp(float(r["joined_at"]), tz=timezone.utc) >= escalate_window:
+        anchor = _quiet_since(r, "joined_at")
+        if anchor is None:
+            continue
+        if now - datetime.fromtimestamp(anchor, tz=timezone.utc) >= escalate_window:
             out.append(r)
     return out
 

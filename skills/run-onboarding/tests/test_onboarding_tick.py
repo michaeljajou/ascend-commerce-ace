@@ -58,6 +58,37 @@ def test_due_escalations_only_after_window_since_join():
     assert got == ["@due", "@guided-due"]
 
 
+def test_a_creator_mid_conversation_is_not_escalated_as_quiet():
+    """QA regression, 2026-07-22: someone answering Ace's questions right now was paged to
+    Slack as unresponsive, because the clock only ever looked at when they joined."""
+    rows = [
+        {"handle": "@typing", "onboarding_state": "collecting",
+         "joined_at": ts_ago(days=8), "last_active_at": ts_ago(hours=1)},
+        {"handle": "@genuinely-quiet", "onboarding_state": "collecting",
+         "joined_at": ts_ago(days=8), "last_active_at": None},
+        {"handle": "@stalled", "onboarding_state": "collecting",
+         "joined_at": ts_ago(days=20), "last_active_at": ts_ago(days=9)},
+    ]
+    got = [r["handle"] for r in tick.due_escalations(rows, NOW, timedelta(days=7))]
+    assert got == ["@genuinely-quiet", "@stalled"]
+
+
+def test_replying_to_ace_also_holds_off_the_nudge():
+    rows = [
+        {"handle": "@answering", "onboarding_state": "collecting", "nudged_at": None,
+         "joined_at": ts_ago(hours=49), "last_active_at": ts_ago(minutes=5)},
+        {"handle": "@silent", "onboarding_state": "collecting", "nudged_at": None,
+         "joined_at": ts_ago(hours=49), "last_active_at": None},
+    ]
+    assert [r["handle"] for r in tick.due_nudges(rows, NOW, timedelta(hours=48))] == ["@silent"]
+
+
+def test_quiet_since_ignores_unparseable_stamps():
+    """Legacy rows carry '' or None; a crash here would stop the whole tick."""
+    assert tick._quiet_since({"joined_at": "", "last_active_at": None}, "joined_at") is None
+    assert tick._quiet_since({"joined_at": "100", "last_active_at": "junk"}, "joined_at") == 100.0
+
+
 def test_escalation_text_has_all_required_fields():
     text = tick.escalation_text({
         "handle": "@quiet", "joined_at": ts_ago(days=7), "discord_id": "42",
