@@ -145,9 +145,13 @@ python ${HERMES_SKILL_DIR}/scripts/onboarding.py trace --handle "@<username>"
 the arguments get mangled:
 
 ```
-python ${HERMES_SKILL_DIR}/../_lib/agent_trace.py --thread <thread_id>
-python ${HERMES_SKILL_DIR}/../_lib/agent_trace.py --list        # recent sessions
+python ${HERMES_SKILL_DIR}/../_lib/agent_trace.py                      # last conversation
+python ${HERMES_SKILL_DIR}/../_lib/agent_trace.py --user <discord_id>  # one creator
+python ${HERMES_SKILL_DIR}/../_lib/agent_trace.py --list               # pick a session
 ```
+
+Cron sessions are hidden by default (`--all` includes them) — the every-2-minute jobs
+otherwise bury the conversation you're looking for.
 
 Every bug found in QA showed up plainly in one of these, and in nothing else:
 `--text ""` (the creator's message dropped), `ModuleNotFoundError: yaml` followed by four
