@@ -121,6 +121,13 @@ class Invocation:
         return False        # never swallow the exception
 
 
+# Rendered explicitly (or deliberately omitted); everything else an event carries is shown
+# generically, so a new field added at a call site never goes invisible in the timeline —
+# which is what happened to `answer.input`, hiding exactly the evidence it was added for.
+_RENDERED_KEYS = {"ts", "event", "command", "duration_s", "args", "result",
+                  "error", "traceback", "python", "pid"}
+
+
 def render(entries: list[dict]) -> str:
     """Human-readable timeline — what to paste when reporting a bad onboarding."""
     if not entries:
@@ -136,6 +143,10 @@ def render(entries: list[dict]) -> str:
         lines.append(head)
         if args := e.get("args"):
             lines.append(f"              args: {json.dumps(args, default=str)[:400]}")
+        for key, value in e.items():
+            if key in _RENDERED_KEYS or key == "handle" or value is None:
+                continue
+            lines.append(f"              {key}: {json.dumps(value, default=str)[:300]}")
         if e.get("event") == "script.error":
             lines.append(f"              ERROR: {e.get('error')}")
             for tb_line in str(e.get("traceback", "")).strip().splitlines()[-4:]:

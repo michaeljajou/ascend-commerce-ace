@@ -82,6 +82,15 @@ def test_render_shows_args_results_and_errors(data_dir):
     assert "No module named 'yaml'" in out
 
 
+def test_render_shows_fields_it_was_not_written_to_know_about(data_dir):
+    """`answer.input` records where the creator's text came from — and the first version of
+    render() silently dropped it, hiding the exact evidence it was added to capture."""
+    trace.record("answer.input", handle="@ava", source="thread", text="bigjohn123",
+                 thread_id="t1")
+    out = trace.render(trace.read("@ava"))
+    assert '"thread"' in out and "bigjohn123" in out and "t1" in out
+
+
 def test_render_explains_an_empty_log_instead_of_printing_nothing(data_dir):
     assert "No trace events recorded" in trace.render([])
     assert str(data_dir) in trace.render([])
