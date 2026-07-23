@@ -171,8 +171,11 @@ def set_fields(conn, handle: str, tiktok: str | None = None, email: str | None =
 
     if failure:
         field, reason, raw = failure
-        bumped = retry(conn, handle, ensure=existing)
+        # Read the limit BEFORE spending a strike. These used to be the other way round,
+        # and when the config read blew up in the agent's sandbox the creator was left
+        # charged for an attempt that never produced a reply — two strikes for one message.
         limit = max_retries()
+        bumped = retry(conn, handle, ensure=existing)
         out = {"ok": False, "handle": handle, "field": field, "reason": reason,
                "retries": bumped["retries"], "max_retries": limit,
                "limit_reached": bumped["retries"] >= limit}

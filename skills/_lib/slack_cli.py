@@ -29,20 +29,29 @@ SLACK_API = "https://slack.com/api/chat.postMessage"
 DEFAULT_CHANNEL = "#ace-escalations"
 
 
+def _brand():
+    """Import the config loader whether we're `_lib.slack_cli` or a directly-run script.
+
+    Skills invoke this file both ways: `from _lib import slack_cli` inside other scripts,
+    and `python _lib/slack_cli.py post ...` from a SKILL.md. A plain relative import works
+    only for the first.
+    """
+    try:
+        from . import brand           # imported as part of the _lib package
+    except ImportError:               # run as a top-level script
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from _lib import brand
+    return brand
+
+
 def profile_dir() -> Path:
     """The profile root, from the bundle's data-dir contract (ACE_DATA_DIR = <profile>/ace)."""
-    if data_dir := os.environ.get("ACE_DATA_DIR"):
-        return Path(data_dir).parent
-    return Path(os.environ.get("HERMES_HOME", "."))
+    return _brand().profile_dir()
 
 
 def load_ace_config(profile: Path) -> dict:
-    cfg_path = profile / "config.yaml"
-    if not cfg_path.exists():
-        return {}
-    import yaml
-
-    return (yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}).get("ace") or {}
+    """Via the PyYAML-free loader — the agent's sandbox has no third-party packages."""
+    return _brand().config(profile)
 
 
 def bot_token(profile: Path) -> str | None:

@@ -59,20 +59,20 @@ def assign(user_id: str, roles: list[str] | None = None,
     alert plus a creator-facing "the team will finish this" message, and that path must
     not itself blow up.
     """
-    profile = profile or Path(os.environ.get("HERMES_HOME", "."))
     if not user_id:
         return {"ok": False, "error": "no Discord ID on record for this creator — the "
                                       "onboarding tick stores it at join time."}
 
-    import yaml
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
+    from _lib import brand
 
-    try:
-        config = yaml.safe_load((profile / "config.yaml").read_text(encoding="utf-8")) or {}
-    except OSError as exc:
-        return {"ok": False, "error": f"cannot read {profile}/config.yaml ({exc})"}
-    ace = config.get("ace") or {}
+    profile = profile or brand.profile_dir()
+    ace = brand.config(profile)          # PyYAML-free; see _lib/brand.py
     guild_id = str((ace.get("discord") or {}).get("guild_id") or "")
     wanted = roles or (ace.get("onboarding") or {}).get("creator_roles") or ["Creator"]
+    if not guild_id:
+        return {"ok": False, "error": f"no brand config found under {profile} — re-run "
+                                      "setup-brand to write it."}
 
     token = bot_token(profile)
     if not token or not guild_id:

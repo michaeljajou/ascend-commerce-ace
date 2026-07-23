@@ -34,19 +34,16 @@ from pathlib import Path
 
 
 def profile_dir() -> Path:
-    if data_dir := os.environ.get("ACE_DATA_DIR"):
-        return Path(data_dir).parent
-    return Path(os.environ.get("HERMES_HOME", "."))
+    from . import brand
+
+    return brand.profile_dir()
 
 
 def brand_config(profile: Path | None = None) -> dict:
-    profile = profile or profile_dir()
-    cfg_path = profile / "config.yaml"
-    if not cfg_path.exists():
-        return {}
-    import yaml
+    """The brand's ace config — via the PyYAML-free loader; see ``_lib/brand.py``."""
+    from . import brand
 
-    return (yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}).get("ace") or {}
+    return brand.config(profile)
 
 
 def webhook_url(ace: dict) -> str | None:

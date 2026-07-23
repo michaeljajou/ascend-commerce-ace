@@ -541,13 +541,26 @@ def write_profile(spec: dict, profile_dir: str | Path) -> dict:
     # The agnostic seam: point the core at this profile's data dir via ACE_DATA_DIR (merged, not clobbered).
     data_dir = (profile / "ace").resolve()
     env_path = ensure_env(profile, {"ACE_DATA_DIR": str(data_dir)})
+    # Same config, as plain JSON, for the scripts the AGENT runs: its code sandbox has no
+    # third-party packages, so a script that reaches for PyYAML dies there. See _lib/brand.py.
+    sidecar = _write_brand_sidecar(profile, config_path)
     return {
         "config": str(config_path),
         "soul": str(soul_path),
         "cronjobs": str(cron_path),
         "env": env_path,
         "data_dir": str(data_dir),
+        "brand_json": sidecar,
     }
+
+
+def _write_brand_sidecar(profile: Path, config_path: Path) -> str:
+    import yaml
+
+    from _lib import brand      # skills/ is already on sys.path (see the top of this file)
+
+    ace = (yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}).get("ace") or {}
+    return brand.write_sidecar(profile, ace)
 
 
 def _load_spec(arg: str) -> dict:

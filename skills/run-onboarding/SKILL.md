@@ -105,6 +105,11 @@ End your turn with only `[SILENT]`.
   creator's thread as raw "Cronjob Response" spam. If a script fails, run it once more; if it
   still fails, post the exact error to Slack (`_lib/slack_cli.py`), tell the creator the team
   will finish their setup, and END the turn. A short clean failure beats a long improvised one.
+- **NEVER install packages, create virtualenvs, or repair the environment.** If a script
+  fails on a missing module, that is a deployment bug, not your problem to route around. One
+  QA turn spent four tool calls on `uv pip install`, `apt-get install` and building a venv
+  before answering the creator — 112 seconds for one message. Say the script failed, tell
+  the creator the team will finish their setup, post the error to Slack, and END the turn.
 - **NEVER edit skills or write new ones**, and never invent a workaround when a script fails.
   The bundle is read-only by design and managed from git. A QA session that hit a blocked
   script wrote itself a skill called `onboarding-scripts-fallback` telling future sessions to
