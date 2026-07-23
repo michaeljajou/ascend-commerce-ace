@@ -49,7 +49,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
 
-from _lib import store  # noqa: E402
+from _lib import store, trace  # noqa: E402
 from _lib.models import Creator  # noqa: E402
 
 NEW, COLLECTING, COMPLETE = "new", "collecting", "complete"
@@ -223,7 +223,54 @@ def next_field(row: dict) -> str | None:
     return None
 
 
-def answer(conn, handle: str, text: str, now: float | None = None) -> dict:
+def latest_creator_message(thread_id: str) -> str | None:
+    """The newest non-bot message in a creator's onboarding thread, read from Discord.
+
+    So the agent never has to copy the creator's words into a command argument. It kept
+    getting that wrong — most recently by passing ``--text ""``, dropping a message the
+    creator had plainly typed — because their text arrives buried at the end of the whole
+    auto-loaded skill document and is easy to lose.
+    """
+    import urllib.error
+    import urllib.request
+
+    from _lib import brand
+
+    profile = brand.profile_dir()
+    token = None
+    env_path = profile / ".env"
+    try:
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("DISCORD_BOT_TOKEN="):
+                token = line.split("=", 1)[1].strip().strip("'\"")
+                break
+    except OSError:
+        return None
+    if not token or not thread_id:
+        return None
+
+    req = urllib.request.Request(
+        f"https://discord.com/api/v10/channels/{thread_id}/messages?limit=10",
+        headers={
+            "Authorization": f"Bot {token}",
+            # A generic Python UA is banned from datacenter IPs by Cloudflare (error 1010).
+            "User-Agent": "DiscordBot (https://github.com/michaeljajou/ascend-commerce-ace, 0.1)",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            messages = json.load(resp)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return None
+    for message in messages:                       # newest first
+        if (message.get("author") or {}).get("bot"):
+            continue
+        if content := (message.get("content") or "").strip():
+            return content
+    return None
+
+
+def answer(conn, handle: str, text: str | None = None, now: float | None = None) -> dict:
     """Take the creator's raw message and drive the whole collection flow one step.
 
     This is THE command for a creator's message. It works out which question is
@@ -235,11 +282,24 @@ def answer(conn, handle: str, text: str, now: float | None = None) -> dict:
     message, so a one-word answer arrives buried under a procedure, and the model's
     instinct is to start the procedure rather than answer it. No amount of prompt wording
     beat that; removing the decision does.
+
+    ``text`` is optional for the same reason: left out, the creator's newest message is
+    read straight from their Discord thread. The agent had been copying it across into a
+    command argument and losing it — re-asking, and finally passing an empty string.
     """
     row = store.get_onboarding(conn, handle)
     if row is None:
         start(conn, handle, now=now)
         row = store.get_onboarding(conn, handle) or {}
+
+    source = "argument"
+    if not (text or "").strip():
+        # Includes the empty-string case: an agent that passes --text "" has dropped the
+        # message, so fall back to the thread rather than charging them a blank retry.
+        if fetched := latest_creator_message(row.get("thread_id") or ""):
+            text, source = fetched, "thread"
+    trace.record("answer.input", handle=handle, source=source, text=text,
+                 thread_id=row.get("thread_id"))
 
     field = next_field(row)
     if field is None:
@@ -485,7 +545,9 @@ def main(argv: list[str] | None = None) -> int:
         p = sub.add_parser(name)
         p.add_argument("--handle", required=True)
         if name == "answer":
-            p.add_argument("--text", required=True, help="the creator's message, verbatim")
+            p.add_argument("--text", help="the creator's message, verbatim. Omit it and "
+                                          "the script reads their newest thread message "
+                                          "itself — safer than copying it across.")
         if name == "set":
             p.add_argument("--tiktok")
             p.add_argument("--email")
@@ -496,10 +558,18 @@ def main(argv: list[str] | None = None) -> int:
     tm.add_argument("state", choices=["on", "off"])
     tm.add_argument("--profile-dir", default=os.environ.get("HERMES_HOME", "."))
     sub.add_parser("stats")
+    tr = sub.add_parser("trace", help="what actually happened, from the structured log")
+    tr.add_argument("--handle", help="one creator; omit for everything recent")
+    tr.add_argument("--limit", type=int, default=60)
+    tr.add_argument("--json", action="store_true", help="raw events instead of a timeline")
     args = ap.parse_args(argv)
 
     if args.cmd == "test-mode":
         print(json.dumps(set_test_mode(Path(args.profile_dir), args.state == "on")))
+        return 0
+    if args.cmd == "trace":
+        events = trace.read(args.handle, args.limit)
+        print(json.dumps(events, indent=2) if args.json else trace.render(events))
         return 0
 
     conn = store.connect()
@@ -516,7 +586,13 @@ def main(argv: list[str] | None = None) -> int:
         "resolve": lambda: resolve(conn, args.handle),
         "stats": lambda: store.onboarding_stats(conn),
     }
-    print(json.dumps(handlers[args.cmd]()))
+    # Record the raw argv, not just the parsed result: the QA bug that cost a whole round
+    # was the agent sending `--text ""`, which is invisible unless you log what ARRIVED.
+    logged = {k: v for k, v in vars(args).items() if k != "cmd" and v is not None}
+    with trace.Invocation(f"onboarding.{args.cmd}",
+                          handle=getattr(args, "handle", None), args=logged) as run:
+        run.result = handlers[args.cmd]()
+        print(json.dumps(run.result))
     return 0
 
 

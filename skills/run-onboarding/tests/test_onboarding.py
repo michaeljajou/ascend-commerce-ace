@@ -290,6 +290,72 @@ def test_answering_ace_counts_as_activity(conn):
     assert onboarding.status(conn, "@ava")["last_active_at"] == "500.0"
 
 
+# --- the agent never has to carry the creator's words ------------------------------------
+
+
+def test_an_empty_text_falls_back_to_the_thread(conn, monkeypatch):
+    """QA, 2026-07-23: the creator typed "mike-2341"; the agent ran `answer --text ""` and
+    told them they'd sent nothing. An empty argument means the agent dropped the message,
+    so read it from the thread rather than charging them a blank retry."""
+    monkeypatch.setattr(onboarding, "latest_creator_message", lambda tid: "bigjohn123")
+    onboarding.start(conn, "@john", now=100.0)
+    store.update_onboarding(conn, "@john", thread_id="t1")
+
+    out = onboarding.answer(conn, "@john", "", now=200.0)
+
+    assert out["ok"] is True
+    assert onboarding.status(conn, "@john")["tiktok"] == "bigjohn123"
+    assert onboarding.status(conn, "@john")["retries"] == 0      # not blamed for it
+
+
+def test_omitting_text_entirely_reads_the_thread(conn, monkeypatch):
+    monkeypatch.setattr(onboarding, "latest_creator_message", lambda tid: "@ava.tt")
+    onboarding.start(conn, "@ava", now=100.0)
+    store.update_onboarding(conn, "@ava", thread_id="t1")
+    out = onboarding.answer(conn, "@ava")
+    assert out["ok"] is True and out["ask"] == "email"
+
+
+def test_an_explicit_text_still_wins(conn, monkeypatch):
+    """The agent passing the message correctly must not be second-guessed."""
+    monkeypatch.setattr(onboarding, "latest_creator_message",
+                        lambda tid: pytest.fail("should not read the thread"))
+    onboarding.start(conn, "@ava", now=100.0)
+    store.update_onboarding(conn, "@ava", thread_id="t1")
+    out = onboarding.answer(conn, "@ava", "realhandle")
+    assert onboarding.status(conn, "@ava")["tiktok"] == "realhandle"
+
+
+def test_a_genuinely_blank_message_is_still_a_blank_answer(conn, monkeypatch):
+    """Discord unreachable, or nothing to read — fall through to the normal retry path."""
+    monkeypatch.setattr(onboarding, "latest_creator_message", lambda tid: None)
+    onboarding.start(conn, "@ava", now=100.0)
+    out = onboarding.answer(conn, "@ava", "")
+    assert out["ok"] is False and out["reason"] == "blank"
+
+
+def test_latest_creator_message_skips_aces_own_posts(monkeypatch, tmp_path):
+    monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "ace"))
+    (tmp_path / ".env").write_text("DISCORD_BOT_TOKEN=tok\n", encoding="utf-8")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            import json as _json
+            return _json.dumps([
+                {"author": {"bot": True}, "content": "Welcome! What's your TikTok?"},
+                {"author": {"username": "john"}, "content": "bigjohn123"},
+            ]).encode()
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: FakeResponse())
+    assert onboarding.latest_creator_message("t1") == "bigjohn123"
+
+
 # --- complete owns role assignment ------------------------------------------------------
 
 

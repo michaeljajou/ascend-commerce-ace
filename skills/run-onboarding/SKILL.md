@@ -26,11 +26,15 @@ the server with nobody notified.
 Run exactly this, once:
 
 ```
-python ${HERMES_SKILL_DIR}/scripts/onboarding.py answer --handle "@<username>" --text "<their message, verbatim>"
+python ${HERMES_SKILL_DIR}/scripts/onboarding.py answer --handle "@<username>"
 ```
 
 `--handle` comes from the THREAD NAME: thread `welcome-jane77` → `@jane77`. Never their
 display name — that creates phantom records.
+
+**You do not pass their message.** The script reads it from the thread itself. Copying it
+into an argument is how it got lost before — including one turn that sent `--text ""` and
+told a creator they'd sent nothing when they hadn't.
 
 Then write ONE short, warm message based on what came back:
 
@@ -124,6 +128,30 @@ End your turn with only `[SILENT]`.
   wherever they actually are.
 - Escalations (7-day quiet) are the tick's job, not yours — don't nudge anyone twice.
 - Don't dump every channel in guidance; three or four that matter beat eleven.
+
+## Debugging a bad onboarding (operators, not the agent)
+
+Two logs, two questions. Run them from the brand's profile (`HERMES_HOME` /
+`ACE_DATA_DIR` set), and paste both when reporting a problem.
+
+**"What did our scripts see?"** — every invocation, its arguments, its result, how long it
+took, which interpreter ran it, and the traceback if it failed:
+
+```
+python ${HERMES_SKILL_DIR}/scripts/onboarding.py trace --handle "@<username>"
+```
+
+**"What did the agent actually type?"** — the commands behind those runs, which is where
+the arguments get mangled:
+
+```
+python ${HERMES_SKILL_DIR}/../_lib/agent_trace.py --thread <thread_id>
+python ${HERMES_SKILL_DIR}/../_lib/agent_trace.py --list        # recent sessions
+```
+
+Every bug found in QA showed up plainly in one of these, and in nothing else:
+`--text ""` (the creator's message dropped), `ModuleNotFoundError: yaml` followed by four
+`pip install` attempts, and a turn that ran no scripts at all.
 
 ## Verification
 
