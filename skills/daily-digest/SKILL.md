@@ -1,7 +1,7 @@
 ---
 name: daily-digest
 description: Post a 9 AM daily digest to the brand's Slack channel — interactions, answer rate, moderation flags, new members, upcoming deadlines.
-version: 0.3.0
+version: 0.3.1
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -36,6 +36,11 @@ actions, new members + how many are mid-onboarding, and upcoming deal deadlines.
 - **If the command fails** (non-zero exit, any error output): retry it ONCE; if it fails again,
   your final response must be the error text — **NEVER `[SILENT]` after a failure**. A silent
   failed digest looks identical to a successful one, and nobody finds out for days.
+- **NEVER install packages, create virtualenvs, or touch the environment.** A missing module
+  is a deployment bug — reporting it IS the successful outcome; a human fixes it in git.
+  2026-07-23: the digest script (since fixed) crashed on a missing module and the agent spent
+  its entire 12-call budget on pip/uv/sudo/venv attempts; the cron job was recorded as FAILED
+  and the flailing buried the one line of error text that mattered.
 - Never edit skill files or create cron jobs — run the one command and stop.
 - Read-only: the digest never changes data; safe to re-run.
 - If the window is quiet, post the digest anyway (zeros are informative) — don't skip.
