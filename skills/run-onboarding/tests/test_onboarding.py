@@ -529,3 +529,28 @@ def test_missing_discord_id_is_a_clean_failure_not_a_crash(monkeypatch):
     monkeypatch.undo()                                 # exercise the real assign()
     out = assign_role.assign("")                       # no id on record
     assert out["ok"] is False and "Discord ID" in out["error"]
+
+
+def test_remove_mirrors_assign_with_delete(monkeypatch):
+    """QA rounds need a role-less member to see the access gate; --remove is that,
+    deterministically, instead of hand-editing roles in the Discord UI."""
+    monkeypatch.undo()
+    from _lib import brand
+
+    monkeypatch.setattr(brand, "config", lambda profile=None: {
+        "discord": {"guild_id": "9"},
+        "onboarding": {"creator_roles": ["onboarded", "creator"]}})
+    monkeypatch.setattr(assign_role, "bot_token", lambda p: "tok")
+    seen = []
+
+    def fake_request(token, path, method="GET"):
+        seen.append((method, path))
+        if path.endswith("/roles"):
+            return [{"id": "r1", "name": "onboarded"}, {"id": "r2", "name": "creator"}]
+        return {}
+
+    monkeypatch.setattr(assign_role, "request", fake_request)
+    out = assign_role.remove("42")
+    assert out["ok"] is True and out["removed"] == ["onboarded", "creator"]
+    assert ("DELETE", "/guilds/9/members/42/roles/r1") in seen
+    assert ("DELETE", "/guilds/9/members/42/roles/r2") in seen

@@ -11,6 +11,7 @@ you, resolving the Discord ID from the store. The CLI exists for operator repair
 
     python assign_role.py --handle @ava                  # id resolved from the store
     python assign_role.py --user-id <discord_id> [--role Creator ...] [--profile-dir <dir>]
+    python assign_role.py --handle @ava --remove         # QA: strip the roles back off
     (default roles: ace.onboarding.creator_roles from the profile config)
 """
 from __future__ import annotations
@@ -59,6 +60,22 @@ def assign(user_id: str, roles: list[str] | None = None,
     alert plus a creator-facing "the team will finish this" message, and that path must
     not itself blow up.
     """
+    return _change(user_id, roles, profile, method="PUT")
+
+
+def remove(user_id: str, roles: list[str] | None = None,
+           profile: Path | None = None) -> dict:
+    """Take the creator roles back off one member.
+
+    Operator/QA tool: with the access gate on, the gate can only be SEEN from a role-less
+    account, and completing onboarding re-grants the roles — so QA rounds need this to
+    reset a test member. Same contract as ``assign``, key ``removed`` instead."""
+    return _change(user_id, roles, profile, method="DELETE")
+
+
+def _change(user_id: str, roles: list[str] | None,
+            profile: Path | None, method: str) -> dict:
+    verb = "assigned" if method == "PUT" else "removed"
     if not user_id:
         return {"ok": False, "error": "no Discord ID on record for this creator — the "
                                       "onboarding tick stores it at join time."}
@@ -82,16 +99,16 @@ def assign(user_id: str, roles: list[str] | None = None,
         guild_roles = request(token, f"/guilds/{guild_id}/roles")
         by_key = ({r["name"].lower(): r["id"] for r in guild_roles}
                   | {r["id"]: r["id"] for r in guild_roles})
-        assigned, missing = [], []
+        changed, missing = [], []
         for want in wanted:
             rid = by_key.get(str(want).lower()) or by_key.get(str(want))
             if not rid:
                 missing.append(want)
                 continue
-            request(token, f"/guilds/{guild_id}/members/{user_id}/roles/{rid}", method="PUT")
-            assigned.append(want)
+            request(token, f"/guilds/{guild_id}/members/{user_id}/roles/{rid}", method=method)
+            changed.append(want)
         if missing:
-            return {"ok": False, "assigned": assigned,
+            return {"ok": False, verb: changed,
                     "error": f"role(s) not found in this server: {missing} — create them "
                              "or fix ace.onboarding.creator_roles."}
     except urllib.error.HTTPError as exc:
@@ -101,7 +118,7 @@ def assign(user_id: str, roles: list[str] | None = None,
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return {"ok": False, "error": f"Discord unreachable ({exc})"}
 
-    return {"ok": True, "assigned": assigned, "user_id": user_id}
+    return {"ok": True, verb: changed, "user_id": user_id}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -110,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--user-id", help="Discord snowflake; omit and pass --handle instead")
     ap.add_argument("--handle", help="@username — resolves the Discord ID from the store")
     ap.add_argument("--role", action="append", help="role name or id (repeatable); default: config")
+    ap.add_argument("--remove", action="store_true",
+                    help="strip the roles instead (QA: gate checks need a role-less member)")
     args = ap.parse_args(argv)
 
     user_id = args.user_id
@@ -124,9 +143,10 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
 
-    result = assign(user_id, args.role, Path(args.profile_dir))
+    result = (remove if args.remove else assign)(user_id, args.role, Path(args.profile_dir))
     if not result["ok"]:
-        print(f"ERROR: role assignment failed: {result['error']}", file=sys.stderr)
+        word = "removal" if args.remove else "assignment"
+        print(f"ERROR: role {word} failed: {result['error']}", file=sys.stderr)
         return 1
     print(json.dumps(result))
     return 0
