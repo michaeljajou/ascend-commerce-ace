@@ -1,7 +1,7 @@
 ---
 name: escalate-to-team
 description: Hand a question or issue to the brand's Slack channel with full context, and log it for KB improvement.
-version: 0.2.0
+version: 0.2.1
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -29,6 +29,9 @@ renegotiation, and escalated complaints.
    ```
    python ${HERMES_SKILL_DIR}/../_lib/slack_cli.py post --text "<summary>"
    ```
+   Write plain text with simple bullets. The script translates formatting for Slack itself
+   (`**bold**`, `### headers`, and Discord `<#id>` channel tags all come out right) — never
+   hand-write Slack syntax.
    The summary must contain:
    - Which Discord channel it came from
    - Creator name / handle

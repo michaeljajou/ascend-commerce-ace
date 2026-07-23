@@ -80,6 +80,43 @@ def test_ace_prefixed_token_wins(tmp_path, monkeypatch):
     assert rc == 0 and calls["token"] == "xoxb-ace"
 
 
+# --- Discord/GitHub markdown → Slack mrkdwn ---------------------------------------------
+# QA, 2026-07-23: the sweep's creative-strategist escalation reached Slack as literal
+# "**Channel:** <#1522268317321138176>" — Slack bolds single stars and can't render a
+# Discord snowflake tag. The agent writes in the only dialect it knows; the script owns
+# the translation.
+
+
+def write_directory(tmp_path):
+    (tmp_path / "channel_directory.json").write_text(json.dumps({
+        "platforms": {"discord": [
+            {"id": "1522268317321138176", "name": "community-chat", "type": "channel"},
+        ]}}), encoding="utf-8")
+
+
+def test_agent_markdown_is_translated_for_slack(tmp_path, monkeypatch):
+    make_profile(tmp_path)
+    write_directory(tmp_path)
+    rc, calls = run(tmp_path, monkeypatch, ["post", "--text",
+                    "**Creator asking** in <#1522268317321138176>\n### Needed\n~~old~~ __new__"])
+    assert rc == 0
+    assert calls["text"] == ("[Glow Labs] *Creator asking* in #community-chat\n"
+                             "*Needed*\n~old~ _new_")
+
+
+def test_proper_mrkdwn_and_slack_links_pass_through_untouched(tmp_path, monkeypatch):
+    make_profile(tmp_path)
+    already_good = "*New creator* _not shared_ <https://discord.com/users/77|profile> #ops"
+    rc, calls = run(tmp_path, monkeypatch, ["post", "--text", already_good])
+    assert calls["text"] == f"[Glow Labs] {already_good}"    # idempotent on our own cards
+
+
+def test_unknown_channel_tag_degrades_to_visible_id(tmp_path, monkeypatch):
+    make_profile(tmp_path)                                   # no channel_directory.json
+    rc, calls = run(tmp_path, monkeypatch, ["post", "--text", "see <#1529877882044682310>"])
+    assert calls["text"] == "[Glow Labs] see #1529877882044682310"
+
+
 def test_network_failure_is_clean_not_a_traceback(tmp_path, monkeypatch, capsys):
     import urllib.error
 

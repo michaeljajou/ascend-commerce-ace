@@ -21,12 +21,48 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.request
 from pathlib import Path
 
 SLACK_API = "https://slack.com/api/chat.postMessage"
 DEFAULT_CHANNEL = "#ace-escalations"
+
+# --- Slack formatting -------------------------------------------------------------------
+# Agent-composed text arrives in Discord/GitHub flavor: **bold**, ### headers, and raw
+# Discord channel tags like <#1522268317321138176>. Slack renders none of that — the team
+# saw literal asterisks and an unclickable snowflake (QA, 2026-07-23). The agent supplies
+# words; formatting is mechanical, so it happens here, at the one door every brand-tagged
+# Slack post walks through. Proper mrkdwn passes through untouched (idempotent): single
+# *bold*, _italics_, <https://url|label> links, and Slack's own <#C…> refs are never
+# matched — the Discord-tag regex requires an all-digit snowflake.
+_HEADER_RE = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE)
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+_UNDERLINE_RE = re.compile(r"__(.+?)__", re.DOTALL)
+_STRIKE_RE = re.compile(r"~~(.+?)~~", re.DOTALL)
+_DISCORD_CHANNEL_RE = re.compile(r"<#(\d{15,})>")
+
+
+def _discord_channel_names(profile: Path) -> dict:
+    """id → name from the gateway's channel_directory.json; {} when unavailable."""
+    try:
+        raw = json.loads((profile / "channel_directory.json").read_text(encoding="utf-8"))
+        return {c.get("id"): c.get("name")
+                for c in (raw.get("platforms") or {}).get("discord") or []
+                if c.get("id") and c.get("name")}
+    except (OSError, ValueError):
+        return {}
+
+
+def slackify(text: str, profile: Path | None = None) -> str:
+    """Translate Discord/GitHub markdown to Slack mrkdwn; resolve Discord channel tags."""
+    names = _discord_channel_names(profile or profile_dir())
+    text = _HEADER_RE.sub(lambda m: "*" + m.group(1).replace("**", "") + "*", text)
+    text = _BOLD_RE.sub(r"*\1*", text)
+    text = _UNDERLINE_RE.sub(r"_\1_", text)
+    text = _STRIKE_RE.sub(r"~\1~", text)
+    return _DISCORD_CHANNEL_RE.sub(lambda m: f"#{names.get(m.group(1), m.group(1))}", text)
 
 
 def _brand():
@@ -101,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
 
     profile = profile_dir()
     ace = load_ace_config(profile)
+    text = slackify(text, profile)              # Discord/GitHub markdown → Slack mrkdwn
     channel = args.channel or ace.get("slack_channel") or DEFAULT_CHANNEL
     brand = ace.get("brand_name") or ace.get("brand_id")
     if brand:
