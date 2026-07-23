@@ -1,7 +1,7 @@
 ---
 name: sweep-unanswered
 description: Handle creator messages the team didn't answer within the grace window. Woken by the zero-token sweep cron — classify each candidate, reply grounded to operational ones, escalate creative ones to Slack silently, skip chatter.
-version: 0.1.0
+version: 0.1.1
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -50,6 +50,12 @@ For EACH candidate message, in order:
    the cron delivery is suppressed; your work already happened in-channel/Slack.
 
 ## Pitfalls
+- **NEVER install packages, build environments, or go spelunking the filesystem when a
+  script fails.** Retry it ONCE; still failing → escalate that candidate to Slack
+  (`escalate-to-team`, reason `script-broken`, include the exact error) and move on.
+  2026-07-23: a grounding script crashed and the agent spent its entire iteration budget
+  reading library source and searching directories — the reply it had already composed
+  never got posted, and the creator's question was silently dropped.
 - Never answer a creative-strategy question in-channel "just this once" — silence + Slack
   escalation IS the correct handling; the human strategist replies in-channel.
 - The grace window already passed — don't ask "is this still needed?"; answer or escalate.
