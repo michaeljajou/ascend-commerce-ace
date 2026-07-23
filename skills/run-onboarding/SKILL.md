@@ -1,7 +1,7 @@
 ---
 name: run-onboarding
 description: Onboard a new creator in their private thread — run one script per message to collect their TikTok handle and contact details, assign their roles, deliver the guidance sequence, and send 48h nudges. Replaces the Vaulty bot.
-version: 0.3.0
+version: 0.3.1
 author: Ascend Commerce
 license: MIT
 metadata:

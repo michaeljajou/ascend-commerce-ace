@@ -60,12 +60,14 @@ def test_max_retries_falls_back_to_the_default_without_config(profile, no_pyyaml
 
 
 def test_answer_completes_a_full_turn_without_pyyaml(profile, no_pyyaml, monkeypatch):
-    """The exact call that crashed: a junk handle, which takes the retry path."""
+    """The exact call that crashed: a rejected answer, which takes the retry path — the
+    one path that reads brand config. The 2026-07-22 original was the hyphenated handle
+    "mike-231"; the gate accepts those now, so the junk here is a genuine non-answer."""
     brand.write_sidecar(profile, {"onboarding": {"max_retries": 3}})
     conn = store.connect(str(profile / "ace" / "ace.db"))
     onboarding.start(conn, "@john", now=100.0)
 
-    out = onboarding.answer(conn, "@john", "mike-231", now=200.0)
+    out = onboarding.answer(conn, "@john", "its on my other phone rn", now=200.0)
 
     assert out["ok"] is False and out["reason"] == "not_a_handle"
     assert out["retries"] == 1                 # ONE strike for one message, not two

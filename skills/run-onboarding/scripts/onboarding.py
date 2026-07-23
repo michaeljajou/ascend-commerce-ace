@@ -65,10 +65,31 @@ DEFAULT_MAX_RETRIES = 3
 # every brand forever; a paragraph of prose gets re-interpreted on each turn by whichever
 # model is cheapest that month. QA caught the agent accepting a Discord thread name
 # ("welcome-john-2029") as a TikTok handle and never counting it as a bad answer.
+#
+# The TikTok gate is two-tier (QA, 2026-07-23). TIKTOK_RE is what TikTok actually allows
+# and used to be the whole gate, but the costs are asymmetric: a false reject loops a real
+# creator into the retry limit and leaves them locked out of the server, while a false
+# accept is one wrong line on a Slack card, fixed in seconds. So anything handle-shaped is
+# accepted, and whatever isn't TikTok-legal gets a "double-check" mark on the signup card
+# (``tiktok_unusual``) instead of a rejection. Hard rejection is reserved for input that
+# clearly isn't a handle — sentences, emails, symbols — and for "welcome-*" thread-name
+# echoes, the one QA regression a lenient gate must never let back in.
 TIKTOK_RE = re.compile(r"^[A-Za-z0-9_.]{1,24}$")
+HANDLE_SHAPED_RE = re.compile(r"^[A-Za-z0-9_.-]{1,30}$")
+THREAD_NAME_RE = re.compile(r"^welcome-", re.IGNORECASE)
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 PHONE_RE = re.compile(r"^\+?\d[\d\s().\-]{5,19}$")
-TIKTOK_URL_RE = re.compile(r"(?:https?://)?(?:www\.)?tiktok\.com/@?([A-Za-z0-9_.]{1,24})")
+TIKTOK_URL_RE = re.compile(r"(?:https?://)?(?:www\.)?tiktok\.com/@?([A-Za-z0-9_.-]{1,30})")
+
+
+def _handle_shaped(candidate: str) -> bool:
+    """Loose enough for a real name typed slightly wrong, still shaped like a handle."""
+    return bool(HANDLE_SHAPED_RE.match(candidate)) and not THREAD_NAME_RE.match(candidate)
+
+
+def tiktok_unusual(value: str | None) -> bool:
+    """A handle we accepted but can't verify as TikTok-legal — marked on the signup card."""
+    return bool(value) and not TIKTOK_RE.match(value)
 
 # A decline is a first-class answer on the optional fields — never a retry, never argued
 # with. Matched on the whole message so "skipping town" isn't read as a refusal.
@@ -99,13 +120,13 @@ def normalize(field: str, raw: str) -> tuple[str | None, str | None]:
         candidate = text.lstrip("@").strip()
         if EMAIL_RE.match(candidate):
             return None, "looks_like_email"
-        if TIKTOK_RE.match(candidate):
+        if _handle_shaped(candidate):
             return candidate, None
         # "my tiktok is @javarisjavar" — pull the @-tagged token out of a sentence. Only
         # an explicit @ counts: without it, "my tiktok is coming soon" would happily save
         # "soon". Anything vaguer goes back as a re-ask, which costs one friendly line.
         tagged = [t.lstrip("@").strip(".,!?;:\"')") for t in text.split() if t.startswith("@")]
-        if len(tagged) == 1 and TIKTOK_RE.match(tagged[0]):
+        if len(tagged) == 1 and _handle_shaped(tagged[0]):
             return tagged[0], None
         return None, "not_a_handle"
     if field == "email":
@@ -404,9 +425,12 @@ def format_signup(row: dict) -> str:
         from datetime import datetime, timezone
 
         when = datetime.fromtimestamp(float(joined), tz=timezone.utc).strftime("%b %-d, %Y")
+    tiktok_line = f"• TikTok: *{shown(row.get('tiktok'))}*"
+    if tiktok_unusual(row.get("tiktok")):
+        tiktok_line += "  ⚠️ _doesn't match TikTok's username rules — double-check with the creator_"
     lines = [
         f"✅ *New creator onboarded:* {row.get('handle') or '(unknown)'}",
-        f"• TikTok: *{shown(row.get('tiktok'))}*",
+        tiktok_line,
         f"• Email: {shown(row.get('email'))}",
         f"• WhatsApp/phone: {shown(row.get('phone'))}",
     ]

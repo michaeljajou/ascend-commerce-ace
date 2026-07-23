@@ -249,6 +249,54 @@ def test_tiktok_rejects_junk(raw, reason):
     assert (value is None) == (reason is not None)
 
 
+# QA, 2026-07-23: the operator's hyphenated test handle ("mike-2313") was hard-rejected.
+# TikTok genuinely forbids hyphens, but the costs are asymmetric — a false reject loops a
+# real creator into the retry limit and leaves them locked out of the server; a false
+# accept is one wrong line on a Slack card. So handle-shaped input is accepted and the
+# not-TikTok-legal ones are marked "double-check" on the signup card instead.
+@pytest.mark.parametrize("raw, expected", [
+    ("mike-2313", "mike-2313"),
+    ("@mike-2313", "mike-2313"),
+    ("my tiktok is @mike-2313", "mike-2313"),
+    ("tiktok.com/@mike-2313", "mike-2313"),
+    ("a" * 25, "a" * 25),                     # over TikTok's 24-char cap — accept, flag
+])
+def test_unusual_but_handle_shaped_input_is_accepted_not_rejected(raw, expected):
+    assert onboarding.normalize("tiktok", raw) == (expected, None)
+
+
+def test_unusual_handles_are_flagged_for_the_team_not_the_creator():
+    assert onboarding.tiktok_unusual("mike-2313") is True
+    assert onboarding.tiktok_unusual("a" * 25) is True
+    assert onboarding.tiktok_unusual("ava.tt") is False
+    assert onboarding.tiktok_unusual("") is False
+    assert onboarding.tiktok_unusual(None) is False
+
+
+def test_signup_card_marks_an_unverified_handle():
+    text = onboarding.format_signup({"handle": "@mike", "tiktok": "mike-2313"})
+    assert "double-check" in text
+    clean = onboarding.format_signup({"handle": "@ava", "tiktok": "ava.tt"})
+    assert "double-check" not in clean
+
+
+def test_thread_name_echoes_stay_rejected_even_under_the_lenient_gate():
+    """Loosening must not re-admit the original QA failure: 'welcome-*' is this system's
+    own thread naming, not anybody's TikTok — and TikTok forbids the hyphen anyway."""
+    assert onboarding.normalize("tiktok", "welcome-mike") == (None, "not_a_handle")
+    assert onboarding.normalize("tiktok", "Welcome-Mike") == (None, "not_a_handle")
+
+
+def test_the_hyphen_qa_round_end_to_end(conn):
+    """QA, 2026-07-23: the creator typed 'mike-2313'; Ace ran one script, got the right
+    verdict for the old gate, and still had to re-ask a creator who had answered."""
+    onboarding.start(conn, "@mike", now=100.0)
+    out = onboarding.answer(conn, "@mike", "mike-2313", now=200.0)
+    assert out["ok"] is True and out["ask"] == "email"
+    assert onboarding.status(conn, "@mike")["tiktok"] == "mike-2313"
+    assert onboarding.status(conn, "@mike")["retries"] == 0
+
+
 @pytest.mark.parametrize("word", ["skip", "no thanks", "Nope", "n/a", "rather not", "-"])
 def test_declining_an_optional_field_is_not_an_error(word):
     assert onboarding.normalize("email", word) == ("", None)
