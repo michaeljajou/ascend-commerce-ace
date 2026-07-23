@@ -48,7 +48,9 @@ def _discord_channel_names(profile: Path) -> dict:
     """id → name from the gateway's channel_directory.json; {} when unavailable."""
     try:
         raw = json.loads((profile / "channel_directory.json").read_text(encoding="utf-8"))
-        return {c.get("id"): c.get("name")
+        # Live directories carry display names ("Test Brand / #community-chat"); Discord
+        # channel names can't contain "/", so the last segment is always the channel.
+        return {c.get("id"): (c.get("name") or "").split("/")[-1].strip().lstrip("#")
                 for c in (raw.get("platforms") or {}).get("discord") or []
                 if c.get("id") and c.get("name")}
     except (OSError, ValueError):

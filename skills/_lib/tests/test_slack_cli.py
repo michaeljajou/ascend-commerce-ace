@@ -88,9 +88,14 @@ def test_ace_prefixed_token_wins(tmp_path, monkeypatch):
 
 
 def write_directory(tmp_path):
+    # Real gateway directories mix shapes: bare names AND guild-qualified display names
+    # ("Test Brand / #community-chat"). The fixture carries both on purpose — a clean
+    # invented shape is how the agent_trace fixture once hid a broken tool.
     (tmp_path / "channel_directory.json").write_text(json.dumps({
         "platforms": {"discord": [
-            {"id": "1522268317321138176", "name": "community-chat", "type": "channel"},
+            {"id": "1522268317321138176", "name": "Test Brand / #community-chat",
+             "guild": "Test Brand", "type": "channel"},
+            {"id": "1496613727171248260", "name": "general", "type": "channel"},
         ]}}), encoding="utf-8")
 
 
