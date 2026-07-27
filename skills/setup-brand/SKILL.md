@@ -47,7 +47,10 @@ marked *(portal)* live in the Discord **Developer Portal**; *(server)* items liv
    `onboarding.data_channel`. *(Optional extra: a Google Sheet mirror — paste the `doPost`
    snippet from `_lib/sheet.py` into Apps Script, deploy as a Web app with access
    "Anyone", and set `onboarding.sheet_webhook` to the deployment URL.)*
-8. *(Access gate)* To lock the server until onboarding is done — new members see ONLY the
+8. *(Access gate)* The lock lives on the **@everyone base role** (View Channels off; creator/
+   staff/bot roles carry their own View) — category overwrites alone don't reach unsynced
+   child channels. Fail-closed for channels created later. To lock the server until
+   onboarding is done — new members see ONLY the
    onboarding channel — run after step 3b:
    ```
    python /opt/data/ascend-commerce-ace/skills/setup-brand/scripts/gate_channels.py --profile-dir <profile_dir>          # dry run

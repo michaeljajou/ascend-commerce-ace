@@ -58,9 +58,48 @@ def test_open_mode_restores_visibility_everywhere():
     assert "r_creator" not in out                          # gate overwrites removed
 
 
+def test_base_role_gate_clears_everyone_and_grants_sight():
+    """QA 2026-07-23: gated categories, yet a fresh join saw eleven channels — unsynced
+    children don't inherit category overwrites; they fall back to the @everyone BASE
+    role. The base role is the real gate. Other permission bits survive verbatim."""
+    roles = [
+        {"id": GUILD, "name": "@everyone", "permissions": str(gate.VIEW_CHANNEL | 2048)},
+        {"id": "r_onboarded", "name": "onboarded", "permissions": "0"},
+        {"id": "r_creator", "name": "creator", "permissions": str(gate.VIEW_CHANNEL)},
+        {"id": STAFF, "name": "Ascend Team", "permissions": str(gate.ADMINISTRATOR)},
+        {"id": BOT, "name": "Ace", "permissions": "0"},
+    ]
+    changes = gate.plan_role_permissions(roles, guild_id=GUILD, creator_role_ids=CREATORS,
+                                         staff_role_id=STAFF, bot_role_id=BOT, opening=False)
+    by_name = {c["name"]: c for c in changes}
+    assert int(by_name["@everyone"]["permissions"]) == 2048        # view cleared, send kept
+    assert int(by_name["onboarded"]["permissions"]) & gate.VIEW_CHANNEL
+    assert int(by_name["Ace"]["permissions"]) & gate.VIEW_CHANNEL
+    assert "creator" not in by_name                # already sighted — nothing to write
+    assert "Ascend Team" not in by_name            # Administrator already implies sight
+    assert list(by_name)[-1] == "@everyone"        # grants land before the lock
+
+
+def test_base_role_gate_is_idempotent_and_open_restores():
+    gated = [
+        {"id": GUILD, "name": "@everyone", "permissions": "2048"},
+        {"id": "r_onboarded", "name": "onboarded", "permissions": str(gate.VIEW_CHANNEL)},
+        {"id": "r_creator", "name": "creator", "permissions": str(gate.VIEW_CHANNEL)},
+        {"id": STAFF, "name": "s", "permissions": str(gate.VIEW_CHANNEL)},
+        {"id": BOT, "name": "b", "permissions": str(gate.VIEW_CHANNEL)},
+    ]
+    common = dict(guild_id=GUILD, creator_role_ids=CREATORS, staff_role_id=STAFF,
+                  bot_role_id=BOT)
+    assert gate.plan_role_permissions(gated, opening=False, **common) == []
+    restored = gate.plan_role_permissions(gated, opening=True, **common)
+    assert [c["name"] for c in restored] == ["@everyone"]
+    assert int(restored[0]["permissions"]) == 2048 | gate.VIEW_CHANNEL
+
+
 def test_only_categories_and_orphans_are_written():
-    """Children inherit their category — writing per-channel overwrites is redundant
-    and is what produced a screen of 403s in QA."""
+    """Categories + orphans get the tidy overwrites (role-scoped privacy, UI intent) —
+    but they are belt, not gate: unsynced children don't inherit them, which is why
+    the @everyone base role carries the actual lock."""
     channels = [
         {"id": "cat1", "type": 4, "name": "Text Channels"},
         {"id": "555", "type": 0, "name": "community-chat", "parent_id": "cat1"},

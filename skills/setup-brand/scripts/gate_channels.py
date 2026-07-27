@@ -4,15 +4,26 @@
 Goal: a brand-new member can see ONLY the onboarding channel. The moment Ace assigns
 their `onboarded`/`creator` roles at the end of onboarding, every public channel opens.
 
-How (no holding role needed — this is why it can't race a join):
-  - every public channel DENIES View Channel to @everyone
-  - each creator role is ALLOWED View Channel on those same channels
-  - the onboarding channel keeps its @everyone view (Discord requires parent-channel
-    view to see a private thread) — that is the one door left open
-  - the staff role is allowed everywhere, so the team never locks itself out
+How — the gate lives on the @everyone BASE ROLE, because Discord has no real
+permission inheritance:
+  1. @everyone loses View Channels server-wide. Category overwrites do NOT cascade to
+     unsynced children — QA 2026-07-23: eleven channels with no overwrite of their own
+     fell back to the base role and were fully visible to a fresh join. The base role
+     is the only switch that covers every channel, including ones an operator creates
+     next month. Fail-closed.
+  2. The creator roles, staff role, and Ace's own role each GAIN View Channels
+     server-wide, so role-holders (and the bot) see everything the instant the role
+     lands. Grants are applied BEFORE the @everyone removal, and the removal aborts
+     unless Ace's own sight is guaranteed — the gate can never blind the bot.
+  3. The onboarding channel keeps an explicit @everyone ALLOW overwrite — a channel
+     overwrite beats the missing base permission — so that one door stays open.
 
-A holding role assigned on join would leave a window where a fast creator sees the
-whole server before the bot reacts; permission overwrites apply the instant they land.
+Category overwrites (deny @everyone / allow creators+staff+bot) are still written:
+they preserve the narrower Paid Collab-style privacy and keep intent visible in the
+Discord UI, but the base role is what actually gates.
+
+No holding role assigned on join — that would leave a window where a fast creator
+sees the whole server before the bot reacts; role/permission edits apply instantly.
 
 Safe by default: prints the plan and changes NOTHING without --apply.
 
@@ -34,6 +45,7 @@ from pathlib import Path
 DISCORD_API = "https://discord.com/api/v10"
 UA = "DiscordBot (https://github.com/michaeljajou/ascend-commerce-ace, 0.1)"
 VIEW_CHANNEL = 1 << 10
+ADMINISTRATOR = 1 << 3
 
 ROLE, MEMBER = 0, 1  # permission-overwrite types
 
@@ -108,6 +120,40 @@ def leaky_channels(channels: list[dict], guild_id: str, onboarding_id: str) -> l
         for o in c.get("permission_overwrites", []):
             if o["id"] == guild_id and int(o.get("allow", 0)) & VIEW_CHANNEL:
                 out.append(c)
+    return out
+
+
+def plan_role_permissions(roles: list[dict], *, guild_id: str, creator_role_ids: list[str],
+                          staff_role_id: str | None, bot_role_id: str | None,
+                          opening: bool) -> list[dict]:
+    """Server-level role changes the gate needs; empty = nothing to do (idempotent).
+
+    Gate: @everyone loses View Channels (the only switch unsynced children and future
+    channels obey) and creator/staff/bot roles gain it. Open: @everyone gets it back;
+    the grants stay — harmless, and removing them could blind role-holders mid-undo.
+    All other permission bits are preserved verbatim.
+    """
+    by_id = {r["id"]: r for r in roles}
+    out = []
+    if not opening:
+        for rid in [*creator_role_ids, staff_role_id, bot_role_id]:
+            r = by_id.get(rid)
+            if r is None:
+                continue
+            perms = int(r.get("permissions", 0))
+            if not perms & (VIEW_CHANNEL | ADMINISTRATOR):
+                out.append({"id": rid, "name": r.get("name", rid), "action": "grant View Channels",
+                            "permissions": str(perms | VIEW_CHANNEL)})
+    everyone = by_id.get(guild_id)
+    if everyone is not None:
+        perms = int(everyone.get("permissions", 0))
+        if opening and not perms & VIEW_CHANNEL:
+            out.append({"id": guild_id, "name": "@everyone", "action": "restore View Channels",
+                        "permissions": str(perms | VIEW_CHANNEL)})
+        elif not opening and perms & VIEW_CHANNEL:
+            # Listed last on purpose: grants land before the lock in the apply loop.
+            out.append({"id": guild_id, "name": "@everyone", "action": "remove View Channels",
+                        "permissions": str(perms & ~VIEW_CHANNEL)})
     return out
 
 
@@ -241,6 +287,40 @@ def main(argv: list[str] | None = None) -> int:
               "keeps working; only gate changes are blocked.", file=sys.stderr)
         if args.apply:
             return 1
+
+    # Server-level role gate — grants first, the @everyone lock last (see docstring).
+    role_changes = plan_role_permissions(roles, guild_id=guild_id,
+                                         creator_role_ids=creator_role_ids,
+                                         staff_role_id=staff_role_id,
+                                         bot_role_id=bot_role_id, opening=args.open)
+    roles_applied, roles_failed = [], []
+    bot_perms = next((int(r.get("permissions", 0)) for r in roles if r["id"] == bot_role_id), 0)
+    bot_sighted = bool(bot_perms & (VIEW_CHANNEL | ADMINISTRATOR))
+    for rc in role_changes:
+        line = f"{rc['action']}: {rc['name']}"
+        if not args.apply:
+            print(f"  would {line}")
+            continue
+        if rc["id"] == guild_id and not args.open and not bot_sighted:
+            print("ERROR: not removing View Channels from @everyone — Ace's own role has "
+                  "no View Channels/Administrator and the grant did not land, so the gate "
+                  "would blind the bot. Tick View Channels on the bot's role in Discord "
+                  "(Server Settings → Roles), then re-run.", file=sys.stderr)
+            roles_failed.append(rc["name"])
+            continue
+        try:
+            discord(token, f"/guilds/{guild_id}/roles/{rc['id']}",
+                    {"permissions": rc["permissions"]}, method="PATCH")
+            print(f"  {line}")
+            roles_applied.append(rc["name"])
+            if rc["id"] == bot_role_id:
+                bot_sighted = True
+        except urllib.error.HTTPError as exc:
+            print(f"  FAILED {line}: {exc.code} {exc.read().decode()[:120]} — the role "
+                  "likely sits at or above the bot's own top role; tick View Channels on "
+                  "it in Discord by hand.", file=sys.stderr)
+            roles_failed.append(rc["name"])
+
     changed = 0
     for channel in sorted(targets, key=lambda c: c.get("position", 0)):
         desired = plan_overwrites(channel, guild_id=guild_id, creator_role_ids=creator_role_ids,
@@ -273,8 +353,12 @@ def main(argv: list[str] | None = None) -> int:
 
     print(json.dumps({
         "mode": verb, "applied": bool(args.apply),
+        "base_role_gate": ([f"{rc['action']}: {rc['name']}" for rc in role_changes]
+                           if not args.apply else
+                           {"applied": roles_applied, "failed": roles_failed}),
         "categories_and_orphans_changed": changed,
-        "note": "child channels inherit their category — only categories/orphans are written",
+        "note": "the @everyone base role is the gate; category overwrites are kept for "
+                "role-scoped privacy (unsynced children do NOT inherit categories)",
         "creator_roles": creator_role_ids, "staff_role": staff_role_id,
         "bot_role": bot_role_id, "onboarding_channel": onboarding_id,
         "left_private_untouched": skipped_private,
