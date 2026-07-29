@@ -74,7 +74,9 @@ brands (server nickname disambiguates if Discord forces a suffix).
 **Verify:** bot appears (offline) in the server member list. Intents are re-verified
 programmatically at Step 3 via `GET /applications/@me` flags once the token is on the VPS.
 
-**Live run:** ⏳ I Am Joy — pending.
+**Live run:** ✅ 2026-07-29 I Am Joy — application created, both privileged intents on,
+token held by operator for Step 3, bot invited via the URL-generator link. Programmatic
+intent/guild verification deferred to Step 3 as designed.
 
 ---
 
