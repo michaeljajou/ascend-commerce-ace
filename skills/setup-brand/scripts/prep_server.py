@@ -4,10 +4,13 @@
 Born during the I Am Joy live run when the operator asked "can't the CLI do this?" —
 and most of the server-prep checklist is indeed plain REST once the bot is invited with
 Manage Roles + Manage Channels: create `Ascend Team` / `onboarded` / `creator`, create
-#agent-ace and the brand's knowledge channels, and verify the Step-1 portal work
-(privileged intents) from the application flags. What stays human, always: turning the
-old greeter bot (Vaulty) off (another bot's config), choosing which people get
-`Ascend Team`, and dragging new channels into categories (cosmetic).
+#agent-ace and the brand's knowledge channels, verify the Step-1 portal work
+(privileged intents) from the application flags, audit the bot's OWN guild permissions
+(printing the re-invite URL that fixes any gap — a bot can't self-escalate), set the
+bot's server nickname, and copy the canonical Ace avatar from an existing brand's bot
+(`--avatar-from-profile`). What stays human, always: creating the application, the two
+privileged-intent toggles, the invite click, turning the old greeter bot (Vaulty) off
+(another bot's config), and choosing which people get `Ascend Team`.
 
 Dry-run by default; `--apply` executes. Idempotent — a re-run creates nothing.
 
@@ -26,6 +29,7 @@ it, so a human must drag it below the bot's role by hand.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -38,6 +42,18 @@ UA = "DiscordBot (https://github.com/michaeljajou/ascend-commerce-ace, 0.1)"
 
 DEFAULT_ROLES = ["Ascend Team", "onboarded", "creator"]
 TEXT_CHANNEL = 0
+ADMINISTRATOR = 1 << 3
+
+# Everything Ace needs at guild level: run the channels/threads/roles it manages, and
+# nothing more. These bits double as the invite URL — one source of truth, so the audit
+# and the fix can never disagree.
+PERMS = {
+    "view_channel": 1 << 10, "send_messages": 1 << 11, "embed_links": 1 << 14,
+    "read_message_history": 1 << 16, "mention_everyone": 1 << 17, "add_reactions": 1 << 6,
+    "manage_channels": 1 << 4, "manage_roles": 1 << 28, "manage_threads": 1 << 34,
+    "create_private_threads": 1 << 36, "send_messages_in_threads": 1 << 38,
+    "change_nickname": 1 << 26,
+}
 
 # Application flags: for each privileged intent Discord sets the plain bit once the bot
 # is verified, or the *_LIMITED bit for unverified bots (<100 guilds) with the portal
@@ -77,6 +93,46 @@ def intent_summary(flags: int) -> dict:
             "message_content": bool(flags & MESSAGE_CONTENT)}
 
 
+def missing_permissions(roles: list[dict], member_role_ids: list[str], guild_id: str) -> list[str]:
+    """Guild-level audit of the bot's OWN permissions (union of its roles + @everyone).
+
+    A bot cannot grant itself anything — Discord forbids self-escalation — so anything
+    missing here is fixed by re-opening the invite URL (re-authorizing updates the
+    integration role in place; nobody gets kicked). Channel overwrites are out of scope:
+    gate_channels owns those.
+    """
+    perms = 0
+    ids = set(member_role_ids) | {guild_id}          # the @everyone base always applies
+    for r in roles:
+        if r["id"] in ids:
+            perms |= int(r.get("permissions", 0))
+    if perms & ADMINISTRATOR:
+        return []
+    return [name for name, bit in PERMS.items() if not perms & bit]
+
+
+def invite_url(app_id: str) -> str:
+    bits = 0
+    for b in PERMS.values():
+        bits |= b
+    return f"https://discord.com/oauth2/authorize?client_id={app_id}&scope=bot&permissions={bits}"
+
+
+def avatar_data_uri(token: str) -> str | None:
+    """The bot's current avatar as a data URI — lets a new brand bot copy the canonical
+    Ace look from an existing brand's bot, so every server shows the same face."""
+    me = discord(token, "/users/@me")
+    h = me.get("avatar")
+    if not h:
+        return None
+    ext, mime = ("gif", "image/gif") if h.startswith("a_") else ("png", "image/png")
+    req = urllib.request.Request(
+        f"https://cdn.discordapp.com/avatars/{me['id']}/{h}.{ext}?size=512",
+        headers={"User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return f"data:{mime};base64,{base64.b64encode(resp.read()).decode('ascii')}"
+
+
 def plan_roles(existing: list[dict], wanted: list[str], bot_top_position: int) -> dict:
     """Which wanted roles to create, and which pre-existing ones the bot cannot manage.
 
@@ -111,6 +167,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--roles", nargs="*", default=DEFAULT_ROLES)
     ap.add_argument("--channels", nargs="*", default=[],
                     help="brand channels to ensure exist (agent-ace is always included)")
+    ap.add_argument("--nick", default="Ace",
+                    help="server nickname for the bot (pass '' to leave as-is)")
+    ap.add_argument("--avatar-from-profile",
+                    help="profile dir of an existing brand — copy its bot's avatar if "
+                         "this bot has none yet")
     ap.add_argument("--apply", action="store_true", help="execute (default: dry run)")
     args = ap.parse_args(argv)
 
@@ -142,9 +203,18 @@ def main(argv: list[str] | None = None) -> int:
     positions = {r["id"]: int(r.get("position", 0)) for r in roles}
     bot_top = max((positions.get(rid, 0) for rid in member.get("roles", [])), default=0)
 
+    missing_perms = missing_permissions(roles, member.get("roles", []), gid)
     role_plan = plan_roles(roles, args.roles, bot_top)
     channels = discord(token, f"/guilds/{gid}/channels")
     chan_plan = plan_channels(channels, ["agent-ace", *args.channels])
+
+    # Look: nickname + avatar. The avatar is copied from an existing brand's bot only
+    # when this bot has none — a deliberately-set custom face is never clobbered.
+    want_nick = args.nick if args.nick and member.get("nick") != args.nick else None
+    want_avatar = None
+    if args.avatar_from_profile and not me.get("avatar"):
+        src = bot_token(Path(args.avatar_from_profile))
+        want_avatar = avatar_data_uri(src) if src else None
 
     errors = []
     if args.apply:
@@ -158,6 +228,17 @@ def main(argv: list[str] | None = None) -> int:
                 discord(token, f"/guilds/{gid}/channels", {"name": name, "type": TEXT_CHANNEL})
             except urllib.error.HTTPError as e:
                 errors.append(f"channel #{name}: HTTP {e.code} — does the bot have Manage Channels?")
+        if want_nick:
+            try:
+                discord(token, f"/guilds/{gid}/members/@me", {"nick": want_nick}, method="PATCH")
+            except urllib.error.HTTPError as e:
+                errors.append(f"nickname: HTTP {e.code} — needs the change_nickname permission")
+        if want_avatar:
+            try:
+                discord(token, "/users/@me", {"avatar": want_avatar}, method="PATCH")
+            except urllib.error.HTTPError as e:
+                errors.append(f"avatar: HTTP {e.code} (avatar changes are rate-limited — "
+                              "retry in a few minutes)")
 
     human_residue = [
         "turn the old greeter bot's (Vaulty) join handling OFF — its config, not ours",
@@ -167,11 +248,19 @@ def main(argv: list[str] | None = None) -> int:
     for name in role_plan["misplaced"]:
         human_residue.append(f"drag role {name!r} BELOW the bot's role — it sits at/above "
                              "the bot, so the bot cannot assign it")
+    if missing_perms:
+        human_residue.append("bot permissions incomplete — re-open the invite URL below "
+                             "(re-authorizing updates them in place, nobody is kicked)")
 
     print(json.dumps({
         "mode": "applied" if args.apply else "dry-run",
         "guild": {"id": gid, "name": guild.get("name")},
+        "bot": {"username": me.get("username"), "nick": member.get("nick"),
+                "set_nick": want_nick, "set_avatar": bool(want_avatar),
+                "has_avatar": bool(me.get("avatar"))},
         "intents": intents,
+        "permissions": {"missing": missing_perms,
+                        "invite_url": invite_url(str(app.get("id", me.get("id"))))},
         "roles": role_plan,
         "channels": chan_plan,
         "errors": errors,
@@ -181,6 +270,10 @@ def main(argv: list[str] | None = None) -> int:
         print("WARNING: a privileged intent is OFF in the Developer Portal — onboarding "
               "join-polls and message reading will fail. Fix before going further.",
               file=sys.stderr)
+        return 1
+    if missing_perms:
+        print("WARNING: the bot lacks guild permissions it needs — open the invite_url "
+              "from the summary to re-grant, then re-run.", file=sys.stderr)
         return 1
     return 1 if errors else 0
 

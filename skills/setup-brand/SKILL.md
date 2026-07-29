@@ -37,8 +37,11 @@ marked *(portal)* live in the Discord **Developer Portal**; *(server)* items liv
    resolve_channels wires it automatically).
    → Items 3–4 are scripted: once the bot is invited and its token is in the profile `.env`,
    `scripts/prep_server.py --profile-dir <profile_dir> --channels <brand channels>` creates
-   the missing roles/channels idempotently and verifies the item-1 intents. Assigning
-   **Ascend Team** to humans and the Vaulty toggle (item 6) stay manual.
+   the missing roles/channels idempotently, verifies the item-1 intents, audits the bot's
+   own permissions (printing the fix-it re-invite URL — bots can't self-escalate), sets the
+   bot's nickname, and copies the Ace avatar from an existing brand
+   (`--avatar-from-profile`). Assigning **Ascend Team** to humans and the Vaulty toggle
+   (item 6) stay manual.
 5. *(Slack)* Invite the workspace's Hermes bot to **#ace-escalations** (`/invite @<bot>`), and
    copy the bot token into the brand profile's `.env` **as `ACE_SLACK_BOT_TOKEN`** (never
    `SLACK_APP_TOKEN`, and not under the name `SLACK_BOT_TOKEN` — that name makes the brand's

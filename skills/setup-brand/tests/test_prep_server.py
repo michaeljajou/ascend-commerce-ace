@@ -45,6 +45,34 @@ def test_intent_summary_accepts_limited_flags():
     assert prep.intent_summary(0) == {"server_members": False, "message_content": False}
 
 
+def test_missing_permissions_unions_roles_and_respects_admin():
+    """The bot's effective guild perms are the union of its roles PLUS the @everyone
+    base; Administrator short-circuits everything. A bot can't self-escalate, so what's
+    missing here is fixed by the re-invite URL, never by the script."""
+    roles = [
+        {"id": "g1", "permissions": str(prep.PERMS["view_channel"])},          # @everyone
+        {"id": "r_bot", "permissions": str(prep.PERMS["send_messages"])},
+    ]
+    missing = prep.missing_permissions(roles, ["r_bot"], "g1")
+    assert "manage_roles" in missing
+    assert "view_channel" not in missing and "send_messages" not in missing
+
+    admin = [{"id": "r_bot", "permissions": str(prep.ADMINISTRATOR)}]
+    assert prep.missing_permissions(admin, ["r_bot"], "g1") == []
+
+    everything = [{"id": "r_bot", "permissions": str(sum(prep.PERMS.values()))}]
+    assert prep.missing_permissions(everything, ["r_bot"], "g1") == []
+
+
+def test_invite_url_carries_every_required_bit():
+    """The audit and the fix share PERMS — the URL must encode exactly that set."""
+    url = prep.invite_url("12345")
+    assert "client_id=12345" in url and "scope=bot" in url
+    bits = int(url.rsplit("permissions=", 1)[1])
+    for name, bit in prep.PERMS.items():
+        assert bits & bit, name
+
+
 def test_reapply_is_a_no_op_plan():
     existing_roles = [{"id": str(i), "name": n, "position": 1}
                      for i, n in enumerate(["Ascend Team", "onboarded", "creator"])]
