@@ -7,8 +7,9 @@ Manage Roles + Manage Channels: create `Ascend Team` / `onboarded` / `creator`, 
 #agent-ace and the brand's knowledge channels, verify the Step-1 portal work
 (privileged intents) from the application flags, audit the bot's OWN guild permissions
 (printing the re-invite URL that fixes any gap — a bot can't self-escalate), set the
-bot's server nickname, and copy the canonical Ace avatar from an existing brand's bot
-(`--avatar-from-profile`). What stays human, always: creating the application, the two
+bot's server nickname, and set the canonical Ace avatar from the repo asset
+(`--avatar-file assets/ace-avatar.png`; `--avatar-from-profile` copies another bot's
+instead). What stays human, always: creating the application, the two
 privileged-intent toggles, the invite click, turning the old greeter bot (Vaulty) off
 (another bot's config), and choosing which people get `Ascend Team`.
 
@@ -118,6 +119,15 @@ def invite_url(app_id: str) -> str:
     return f"https://discord.com/oauth2/authorize?client_id={app_id}&scope=bot&permissions={bits}"
 
 
+def file_data_uri(path: Path) -> str:
+    """A local image as a data URI — the canonical Ace face lives in the repo at
+    assets/ace-avatar.png, so every brand bot gets it from git, not from hoping some
+    other bot already wears it."""
+    mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+            "gif": "image/gif"}.get(path.suffix.lstrip(".").lower(), "image/png")
+    return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+
+
 def avatar_data_uri(token: str) -> str | None:
     """The bot's current avatar as a data URI — lets a new brand bot copy the canonical
     Ace look from an existing brand's bot, so every server shows the same face."""
@@ -169,9 +179,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="brand channels to ensure exist (agent-ace is always included)")
     ap.add_argument("--nick", default="Ace",
                     help="server nickname for the bot (pass '' to leave as-is)")
+    ap.add_argument("--avatar-file",
+                    help="image file to set as the bot's avatar if it has none yet "
+                         "(canonical: <repo>/assets/ace-avatar.png)")
     ap.add_argument("--avatar-from-profile",
                     help="profile dir of an existing brand — copy its bot's avatar if "
-                         "this bot has none yet")
+                         "this bot has none yet (fallback when no --avatar-file)")
     ap.add_argument("--apply", action="store_true", help="execute (default: dry run)")
     args = ap.parse_args(argv)
 
@@ -212,9 +225,12 @@ def main(argv: list[str] | None = None) -> int:
     # when this bot has none — a deliberately-set custom face is never clobbered.
     want_nick = args.nick if args.nick and member.get("nick") != args.nick else None
     want_avatar = None
-    if args.avatar_from_profile and not me.get("avatar"):
-        src = bot_token(Path(args.avatar_from_profile))
-        want_avatar = avatar_data_uri(src) if src else None
+    if not me.get("avatar"):
+        if args.avatar_file:
+            want_avatar = file_data_uri(Path(args.avatar_file))
+        elif args.avatar_from_profile:
+            src = bot_token(Path(args.avatar_from_profile))
+            want_avatar = avatar_data_uri(src) if src else None
 
     errors = []
     if args.apply:

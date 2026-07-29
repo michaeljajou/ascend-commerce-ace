@@ -130,7 +130,7 @@ one knowledge/creator store). Awaiting operator token drop.
    docker exec hermes-ace /opt/hermes/.venv/bin/python3 \
      /opt/data/ascend-commerce-ace/skills/setup-brand/scripts/prep_server.py \
      --profile-dir /opt/data/profiles/<brand> \
-     --avatar-from-profile /opt/data/profiles/test-brand \
+     --avatar-file /opt/data/ascend-commerce-ace/assets/ace-avatar.png \
      --channels <every channel named in knowledge.yaml>          # then: --apply
    ```
    The script (idempotent) does everything the API allows:
@@ -146,9 +146,10 @@ one knowledge/creator store). Awaiting operator token drop.
    - **audits the bot's own guild permissions** and prints the invite URL that fixes
      any gap (a bot can't grant itself permissions; re-opening the URL re-grants in
      place, nobody is kicked);
-   - sets the bot's server **nickname** (default `Ace`) and copies the canonical Ace
-     **avatar** from an existing brand's bot (only when this bot has none — a custom
-     face is never clobbered).
+   - sets the bot's server **nickname** (default `Ace`) and its **avatar** from the
+     canonical repo asset `assets/ace-avatar.png` (only when the bot has none — a
+     custom face is never clobbered; `--avatar-from-profile <dir>` copies from an
+     existing brand's bot instead).
 2. Operator — the residue the API can't reach:
    - Turn **Vaulty's join handling OFF** on this server (it's Vaulty's config, not ours);
      two greeters means duplicate onboarding spaces and role conflicts.
