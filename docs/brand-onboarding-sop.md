@@ -317,6 +317,26 @@ formatted and brand-tagged; digest cron green.
 
 ---
 
+## Ops note — pausing / resuming a brand
+
+Inviting the bot to a server activates NOTHING: it sits offline until its profile's
+gateway runs. A brand is "live" only while two things run, and each pauses independently:
+
+- **Gateway** (live listening: mentions, DMs, onboarding threads):
+  `hermes --profile <brand> gateway stop` → bot shows offline, hears nothing.
+  Resume with `gateway run` (how this box runs it) or `gateway start` if installed as a
+  service. `gateway list` shows every profile's state.
+- **Cron jobs** (sweep, digest — these fire even with the gateway down, because the
+  scripts talk to Discord via REST): `hermes --profile <brand> cron pause <job>` /
+  `cron resume <job>`; `cron list` to see them.
+
+During onboarding (this SOP), a new brand is fully paused by default: no gateway, no
+crons until Steps 5/7 — and the Step 5 first connect is deliberately brief
+(build directory → stop). Leave the gateway down through Steps 6–8 and bring it up for
+the Step 9 smoke test.
+
+---
+
 ## Known decisions still open (flagged during pilot)
 - `fallback_providers` for the model config — decide before multi-brand rollout.
 - Welcome-back fast-track (leave + rejoin) — untested path.
