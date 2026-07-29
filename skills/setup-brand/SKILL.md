@@ -35,6 +35,10 @@ marked *(portal)* live in the Discord **Developer Portal**; *(server)* items liv
    — Discord forbids assigning roles at or above the assigner's own.
 4. *(server)* Create the **#agent-ace** channel (Ace's home for cron output/notifications;
    resolve_channels wires it automatically).
+   → Items 3–4 are scripted: once the bot is invited and its token is in the profile `.env`,
+   `scripts/prep_server.py --profile-dir <profile_dir> --channels <brand channels>` creates
+   the missing roles/channels idempotently and verifies the item-1 intents. Assigning
+   **Ascend Team** to humans and the Vaulty toggle (item 6) stay manual.
 5. *(Slack)* Invite the workspace's Hermes bot to **#ace-escalations** (`/invite @<bot>`), and
    copy the bot token into the brand profile's `.env` **as `ACE_SLACK_BOT_TOKEN`** (never
    `SLACK_APP_TOKEN`, and not under the name `SLACK_BOT_TOKEN` — that name makes the brand's

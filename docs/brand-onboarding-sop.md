@@ -80,58 +80,79 @@ intent/guild verification deferred to Step 3 as designed.
 
 ---
 
-## Step 2 — Server prep (Discord Server Settings)
+## Step 2 — Profile shell + secrets (VPS)
 
-**Who:** Operator, in the brand's server.
+**Who:** Runner creates the profile; Operator drops the one new secret. (Comes BEFORE
+server prep so the bot token is on the box — Step 3 is scripted and needs it.)
 
 **Do:**
-1. **Roles:** create **Ascend Team**, **onboarded**, **creator**. Drag `onboarded` and
-   `creator` **below the bot's role** (Discord forbids assigning roles at/above the
-   assigner's own top role). Assign **Ascend Team** to every human team member — it gates
-   the reply-sweep (team replies release Ace), staff visibility, and never-onboard filtering.
-2. **Channels:** create **#agent-ace** (Ace's ops/output channel). Confirm every channel
-   named in `knowledge.yaml` exists with exactly that name — for I Am Joy:
-   #announcements, #community-chat, #our-products, #campaigns, #challenges,
-   #how-to-level-up. (Name mismatch degrades Ace's channel references from clickable
-   links to plain text.)
-3. **Vaulty:** turn its join handling OFF on this server before onboarding is enabled —
-   two greeters means duplicate onboarding spaces and role conflicts.
-4. Note whether this is a **fresh server or an existing live community** — it decides the
-   Step 8 branch.
+1. Runner — create the profile by cloning an existing brand (brings the shared secrets
+   and the skills bundle; no secret ever transits chat):
+   ```
+   docker exec hermes-ace hermes profile create <brand> --clone-from test-brand --description "..."
+   ```
+2. Runner — **immediately scrub the cloned Discord identity** (the clone carries the
+   source brand's bot token; if the gateway ever started with it, this profile would
+   connect AS the other brand's bot) and repoint the data dir:
+   ```
+   docker exec hermes-ace sh -c 'sed -i "/^DISCORD_BOT_TOKEN=/d;/^DISCORD_HOME_CHANNEL/d" /opt/data/profiles/<brand>/.env'
+   docker exec hermes-ace sh -c 'sed -i "s|^ACE_DATA_DIR=.*|ACE_DATA_DIR=/opt/data/profiles/<brand>/ace|" /opt/data/profiles/<brand>/.env'
+   docker exec hermes-ace mkdir -p /opt/data/profiles/<brand>/ace
+   ```
+3. Operator — append the new bot's token (from Step 1) to the profile `.env`; token value
+   never transits chat or this repo:
+   ```
+   ssh ascomm-vps 'docker exec -i hermes-ace tee -a /opt/data/profiles/<brand>/.env' <<< 'DISCORD_BOT_TOKEN=<paste>'
+   ```
+4. Runner — verify by key NAMES only (`grep -o "^[A-Z_]*" .env`): `DISCORD_BOT_TOKEN`,
+   `ACE_SLACK_BOT_TOKEN`, `OPENROUTER_API_KEY`, `ACE_DATA_DIR`. **Never** store the Slack
+   token under the name `SLACK_BOT_TOKEN` in a brand `.env` — that name makes the Hermes
+   gateway treat the brand as a Slack platform and retry-connect forever.
 
-**Verify:** roles exist in the right order; #agent-ace + knowledge channels present;
-Vaulty join handling off.
+**Verify:** the four keys present; no second `DISCORD_BOT_TOKEN` line (readers take the
+FIRST match — a stale cloned line would win over the operator's).
 
-**Live run:** ⏳ I Am Joy — pending.
+**Live run:** 🔄 2026-07-29 I Am Joy — shell created via `--clone-from test-brand`
+(clone warned "no API keys yet" but the `.env` came through; keys verified by name),
+cloned `DISCORD_BOT_TOKEN`/`DISCORD_HOME_CHANNEL` scrubbed, `ACE_DATA_DIR` was still
+pointing at test-brand's data dir — repointed (real trap: two brands silently sharing
+one knowledge/creator store). Awaiting operator token drop.
 
 ---
 
-## Step 3 — Profile shell + secrets (VPS)
+## Step 3 — Server prep (scripted + human residue)
 
-**Who:** Runner creates the profile; Operator drops the one new secret.
+**Who:** Runner runs the script; Operator does the residue.
 
 **Do:**
-1. Runner: create the Hermes profile for the brand (`hermes` CLI on the VPS — exact
-   command recorded on first live run ⏳).
-2. Operator: place the Discord bot token in the profile `.env` (Runner supplies the exact
-   one-liner with the real profile path; token value never transits chat or this repo):
+1. Runner — dry-run, read the plan, then apply:
    ```
-   ssh ascomm-vps "docker exec -i hermes-ace sh -c 'echo DISCORD_BOT_TOKEN=<paste> >> /opt/data/profiles/<brand>/.env'"
+   docker exec hermes-ace /opt/hermes/.venv/bin/python3 \
+     /opt/data/ascend-commerce-ace/skills/setup-brand/scripts/prep_server.py \
+     --profile-dir /opt/data/profiles/<brand> \
+     --channels <every channel named in knowledge.yaml>          # then: --apply
    ```
-3. Runner: copy shared secrets from an existing brand profile's `.env` on the box:
-   `ACE_SLACK_BOT_TOKEN` (same Slack workspace — bot already in #ace-escalations and
-   #ace-onboarding) and the OpenRouter key. **Never** store the Slack token under the name
-   `SLACK_BOT_TOKEN` in a brand `.env` — that name makes the Hermes gateway treat the brand
-   as a Slack platform and retry-connect forever.
-4. Runner: verify the Discord token + intents via REST (`/applications/@me`,
-   `/users/@me/guilds`) — also yields the **guild_id** for Step 4. Discord REST requires a
-   `DiscordBot (<url>, <version>)` User-Agent or Cloudflare 403s.
+   The script creates the missing roles (**Ascend Team**, **onboarded**, **creator** —
+   new roles land at the bottom of the list, i.e. below the bot, exactly where the bot
+   needs them to be assignable) and the missing text channels (**#agent-ace** always,
+   plus the brand list — names must match `knowledge.yaml` exactly or Ace's channel
+   references degrade to plain text). It also reads back the **Step 1 privileged-intent
+   toggles** from `/applications/@me` (fails loudly if one is off) and prints the
+   **guild_id** needed in Step 4. Idempotent; pre-existing roles sitting at/above the
+   bot's role are reported for a human drag, never moved.
+2. Operator — the residue the API can't reach:
+   - Turn **Vaulty's join handling OFF** on this server (it's Vaulty's config, not ours);
+     two greeters means duplicate onboarding spaces and role conflicts.
+   - Assign **Ascend Team** to every human team member (it gates the reply-sweep, staff
+     visibility, and never-onboard filtering).
+   - Optionally drag the new channels into categories (cosmetic).
+3. Answer the branch question: **fresh server or existing live community?** — decides
+   Step 8.
 
-**Verify:** `.env` holds `DISCORD_BOT_TOKEN`, `ACE_SLACK_BOT_TOKEN`, OpenRouter key;
-`/applications/@me` flags show both privileged intents; `/users/@me/guilds` lists the brand
-guild.
+**Verify:** re-run the dry-run — `create` lists empty, both intents `true`, no
+`misplaced` roles.
 
-**Live run:** ⏳ I Am Joy — pending.
+**Live run:** ⏳ I Am Joy — pending (blocked on the Step 2 token drop).
 
 ---
 
