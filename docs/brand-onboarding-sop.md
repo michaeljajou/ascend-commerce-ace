@@ -112,11 +112,14 @@ server prep so the bot token is on the box — Step 3 is scripted and needs it.)
 **Verify:** the four keys present; no second `DISCORD_BOT_TOKEN` line (readers take the
 FIRST match — a stale cloned line would win over the operator's).
 
-**Live run:** 🔄 2026-07-29 I Am Joy — shell created via `--clone-from test-brand`
+**Live run:** ✅ 2026-07-29 I Am Joy — shell created via `--clone-from test-brand`
 (clone warned "no API keys yet" but the `.env` came through; keys verified by name),
 cloned `DISCORD_BOT_TOKEN`/`DISCORD_HOME_CHANNEL` scrubbed, `ACE_DATA_DIR` was still
 pointing at test-brand's data dir — repointed (real trap: two brands silently sharing
-one knowledge/creator store). Awaiting operator token drop.
+one knowledge/creator store). Operator token drop verified: exactly one
+`DISCORD_BOT_TOKEN` line, five keys present. Bonus catch: the token was valid but the
+bot was in ZERO guilds — the Step 1 invite click had never been completed; the script's
+zero-guild error now prints the exact invite URL as the fix.
 
 ---
 
