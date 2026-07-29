@@ -204,6 +204,13 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     elif len(guilds) == 1:
         guild = guilds[0]
+    elif not guilds:
+        # Valid token, no guilds: the portal invite was never completed. Hand the
+        # operator the exact fix — this needs Manage Server on the target server.
+        print("ERROR: the bot is in NO servers — the invite was never completed.\n"
+              f"Open this URL, pick the brand's server, and authorize:\n"
+              f"  {invite_url(str(app.get('id', '')))}", file=sys.stderr)
+        return 1
     else:
         print(f"ERROR: bot is in {len(guilds)} guilds — pass --guild-id. "
               + ", ".join(f"{g['name']}={g['id']}" for g in guilds), file=sys.stderr)
