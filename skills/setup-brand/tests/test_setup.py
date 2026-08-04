@@ -85,6 +85,31 @@ def test_merge_config_preserves_hermes_keys(tmp_path):
     assert data["model"] == "anthropic/claude-sonnet-4-6"           # answer model at top-level (spec had one)
 
 
+def test_merge_config_drops_foreign_onboarding_channel_id(tmp_path):
+    """Profiles are created by cloning another brand (SOP Step 2), so the pre-setup
+    config carries the SOURCE brand's onboarding channel_id — live state for the WRONG
+    guild. Same-guild re-runs keep it (resolve_channels wrote it); clones drop it."""
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"ace": {
+        "discord": {"guild_id": "other-guild"},
+        "onboarding": {"channel_id": "15237"},
+    }}), encoding="utf-8")
+    setup.merge_config(cfg, make_spec())                    # make_spec guild differs
+    data = yaml.safe_load(cfg.read_text())
+    assert "channel_id" not in data["ace"]["onboarding"]    # foreign id dropped
+
+    same = make_spec()
+    cfg.write_text(yaml.safe_dump({"ace": {
+        "discord": {"guild_id": str(same["discord"]["guild_id"])},
+        "onboarding": {"channel_id": "15237"},
+    }}), encoding="utf-8")
+    setup.merge_config(cfg, same)
+    data = yaml.safe_load(cfg.read_text())
+    assert data["ace"]["onboarding"]["channel_id"] == "15237"   # same guild: preserved
+
+
 def test_merge_config_sets_quiet_display_defaults(tmp_path):
     import yaml
 

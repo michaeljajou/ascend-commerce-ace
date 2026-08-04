@@ -459,10 +459,16 @@ def merge_config(config_path: str | Path, spec: dict) -> None:
     existing = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
     existing = existing or {}
     # The onboarding channel id is live Discord state written post-connect by
-    # resolve_channels.py — keep it across spec-driven regeneration.
-    prior_onboarding_channel = ((existing.get("ace") or {}).get("onboarding") or {}).get("channel_id")
+    # resolve_channels.py — keep it across spec-driven regeneration, but ONLY when the
+    # existing config belongs to the SAME guild. Profiles are created by cloning
+    # another brand (SOP Step 2), so the pre-setup config carries the SOURCE brand's
+    # channel id — preserving it would wire onboarding at a channel in the wrong
+    # server (caught on the I Am Joy clone, 2026-08-04).
+    prior_ace = existing.get("ace") or {}
+    prior_onboarding_channel = (prior_ace.get("onboarding") or {}).get("channel_id")
+    prior_guild = str((prior_ace.get("discord") or {}).get("guild_id") or "")
     existing["ace"] = build_config(spec)
-    if prior_onboarding_channel:
+    if prior_onboarding_channel and prior_guild == str(spec["discord"]["guild_id"]):
         existing["ace"]["onboarding"]["channel_id"] = prior_onboarding_channel
     # Resolve the provider BEFORE the model key is rewritten below — that rewrite is where
     # the routing info would otherwise disappear.
