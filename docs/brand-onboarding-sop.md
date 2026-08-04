@@ -189,16 +189,32 @@ Residue open: intent toggles, role drag, Ascend Team assignment, Vaulty off.
    channel behavior map (mirror an existing brand's mapping as baseline: community-chat
    POST_ANSWER, our-products ANSWER, announcements POST_ONLY, etc.), `slack_channel`,
    `model` (mirror the pilot-proven config), `ace.onboarding.enabled: true`.
-2. Run `python skills/setup-brand/scripts/setup.py --spec <spec.json>` (via the Hermes venv
-   in the container). Writes `config.yaml`, `SOUL.md`, `cronjobs.yaml`, merges
-   `ACE_DATA_DIR` into `.env`, and applies the security hardening automatically
-   (approvals, strict code execution, command allowlist, reduced toolset, silenced chatter
-   channels — see SKILL.md 3a; do not hand-edit these away).
+2. Store the spec at `<profile>/spec.json` (documents the brand; makes re-runs one
+   command), then run `python skills/setup-brand/scripts/setup.py --spec
+   <profile>/spec.json --profile-dir <profile>` (via the Hermes venv in the container).
+   Writes `config.yaml`, `SOUL.md`, `cronjobs.yaml`, merges `ACE_DATA_DIR` into `.env`,
+   and applies the security hardening automatically (approvals, strict code execution,
+   command allowlist, reduced toolset, silenced chatter channels — see SKILL.md 3a; do
+   not hand-edit these away).
+3. **`chown -R hermes:hermes <profile>` after every setup run** — operator commands run
+   as root in the container, but the gateway and all agent scripts run as uid 10000; a
+   root-owned profile can't write its own state.
 
 **Verify:** `config.yaml` scoping matches the intended channel map; `SOUL.md` carries the
-brand voice + locked rules; `ACE_DATA_DIR=<profile>/ace` in `.env`.
+brand voice + locked rules; `ACE_DATA_DIR=<profile>/ace` in `.env`; and
+`ace.onboarding.channel_id` is ABSENT (on a cloned profile it must not carry the source
+brand's — setup.py drops a foreign one automatically since a0d4bd2).
 
-**Live run:** ⏳ I Am Joy — pending.
+**Live run:** ✅ 2026-08-04 I Am Joy — spec stored in-profile, channels mirrored from
+test-brand semantics (challenges upgraded POST_ONLY→POST_ANSWER: this brand runs weekly
+challenge Q&A). Catches: (1) the cloned config carried TEST-BRAND's
+`onboarding.channel_id` and the merge preserved it — guard added (a0d4bd2) + one-time
+manual drop (the pre-guard run had already re-stamped it under the new guild);
+(2) root-owned profile after setup → chown step added; (3) sweep resolved engaged
+channels by EXACT directory name and would have watched zero of this server's
+emoji-decorated channels — slug fix (0856ce3), test-brand's installed copy refreshed
+too. Root model/providers survived the merge (inherited from clone); hardening
+verified applied.
 
 ---
 
