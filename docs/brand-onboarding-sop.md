@@ -231,12 +231,24 @@ verified applied.
    wires the mention-only gateway (`require_mention: true`), `DISCORD_HOME_CHANNEL`
    (#agent-ace), the SOUL.md channel directory, and the onboarding channel (creates
    #onboarding, binds it as the sole free-response channel, binds `run-onboarding`).
-3. Restart the gateway (the profile's supervised service).
+3. Do NOT restart the gateway for a brand still being onboarded — it stays down through
+   Steps 6–8 and comes up at the Step 9 smoke test (see the pause/resume ops note).
+   Gateway invocation on this box: `docker exec -d -u 10000 -e HOME=/opt/data hermes-ace
+   hermes --profile <brand> gateway run`.
 
-**Verify:** gateway log shows the directory; `config.yaml` has `require_mention: true` and
-`ace.onboarding.channel_id`; SOUL.md channel map lists the real `<#id>`s.
+**Verify:** `channel_directory.json` exists with N > 0 channels; `config.yaml` has
+`require_mention: true` and `ace.onboarding.channel_id`; SOUL.md channel map lists the
+real `<#id>`s.
 
-**Live run:** ⏳ I Am Joy — pending.
+**Live run:** ✅ 2026-08-04 I Am Joy — connected ~60s as uid 10000, directory built
+(178 channels, decorated names), stopped. Before first connect, scrubbed two more
+cloned leftovers: root `discord.free_response_channels` and `channel_skill_bindings`
+still pointed at test-brand's onboarding channel. resolve_channels then 403'd creating
+#onboarding: its overwrites DENY public threads and Discord rejects (50013) overwrites
+touching permissions the bot doesn't hold — **Create Public Threads** was missing from
+the original invite set; added to prep_server PERMS (audit + URL), operator re-clicked,
+resolve succeeded: #onboarding `1534273465333321831`, five swept channels resolved via
+slugs, home `#agent-ace` wired, SOUL directory written. Gateway left DOWN by design.
 
 ---
 
@@ -252,9 +264,13 @@ verified applied.
    the raw-text fallback): `python3 skills/get-knowledge/scripts/get.py --section brand`
    with the profile's `ACE_DATA_DIR`.
 
-**Verify:** sandbox `get.py` returns the brand section; off-topic `--query` returns empty.
+**Verify:** BOTH paths — the venv (parsed) path returns a slice on-topic and EMPTY
+off-topic (the escalate signal), and the sandbox path (uid 10000, `/usr/bin/python3`)
+prints the raw file (the no-PyYAML fallback can't subset, so never test emptiness there).
 
-**Live run:** ⏳ I Am Joy — pending.
+**Live run:** ✅ 2026-08-04 I Am Joy — staged file copied in, hermes-owned; venv:
+commission query returned the FAQ slice, "wifi password" returned empty; sandbox as
+uid 10000: raw fallback served the file.
 
 ---
 
@@ -269,12 +285,21 @@ hermes --profile <brand> cron create "every 2m" --name sweep-unanswered \
   --skill sweep-unanswered --script ace-sweep.py --deliver discord \
   "Handle the unanswered creator messages surfaced above, following the sweep-unanswered skill exactly. End with only [SILENT]."
 ```
-Plus daily-digest and the other blueprint jobs (mirror the pilot brand's set).
+Plus daily-digest and the other blueprint jobs (mirror the pilot brand's set:
+daily-digest, nudge-inactive, sweep-unanswered, onboarding-tick, weekly-reminders).
 
-**Verify:** `hermes --profile <brand> cron list`; force one sweep tick and confirm a quiet
-tick spends zero tokens ("ok" with nothing to do).
+Gotchas (all bit): run cron commands as **`-u 10000 -e HOME=/opt/data`** — the cron
+store is HOME-relative, so jobs created as root live in a different store than the
+scheduler reads. **Immediately `cron pause` every job** for a brand not yet live
+(sweep/onboarding-tick fire within 2 minutes of creation and talk to Discord via REST
+even with the gateway down). `cron list` hides paused jobs — use `--all`.
 
-**Live run:** ⏳ I Am Joy — pending.
+**Verify:** `cron list --all` shows the full set paused (pre-live) or active (live);
+at go-live, force one sweep tick and confirm a quiet tick spends zero tokens.
+
+**Live run:** ✅ 2026-08-04 I Am Joy — five jobs registered as uid 10000 +
+HOME=/opt/data, paused within the same minute (sweep's first fire was 2 minutes out),
+`cron list --all` confirms all five paused. Resume happens at Step 9.
 
 ---
 
