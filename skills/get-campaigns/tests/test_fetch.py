@@ -55,6 +55,20 @@ def test_main_fetches_per_channel(tmp_path, monkeypatch, capsys):
     assert calls["100"] == ("tok123", 10)          # token read from profile .env; default limit
 
 
+def test_decorated_live_names_resolve(tmp_path, monkeypatch, capsys):
+    """Live servers name these '🏁│campaigns' / '🏅│challenges'. Exact-name matching
+    returned 'none of the channels exist', burned an onboarding run's whole iteration
+    budget, and the exhaustion fallback leaked raw model markup into the creator's
+    welcome thread (I Am Joy, 2026-08-04)."""
+    make_profile(tmp_path, channels=("🏁│campaigns", "🏅│challenges"))
+    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+    monkeypatch.setattr(fetch, "fetch_messages", lambda *a: [msg("drop!")])
+    assert fetch.main(["--profile-dir", str(tmp_path)]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["missing_channels"] == []
+    assert out["channels"]["campaigns"]["active"]["content"] == "drop!"
+
+
 def test_main_reports_missing_channels(tmp_path, monkeypatch, capsys):
     make_profile(tmp_path, channels=("campaigns",))   # no #challenges in this server
     monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)

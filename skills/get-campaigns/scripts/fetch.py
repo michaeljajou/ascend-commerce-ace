@@ -44,8 +44,28 @@ def bot_token(profile: Path) -> str | None:
     return None
 
 
+# Mirror of setup-brand/scripts/prep_server.channel_slug (canonical) — this script runs
+# in the agent sandbox and must stay self-contained. Live servers decorate channel names
+# ('🏁│campaigns'); config/spec carry plain names. Exact-name matching here burned an
+# onboarding run's whole iteration budget ("none of the channels exist") and the
+# budget-exhaustion fallback leaked raw model markup into the creator's welcome thread
+# (I Am Joy, 2026-08-04).
+_NAME_SEPARATORS = ("/", "│", "︱", "┃", "|")
+
+
+def channel_slug(name: str) -> str:
+    for sep in _NAME_SEPARATORS:
+        if sep in name:
+            name = name.rsplit(sep, 1)[1]
+    name = name.strip().lstrip("#")
+    while name and not name[0].isalnum():
+        name = name[1:]
+    return name.casefold()
+
+
 def channel_ids(profile: Path, names: list[str]) -> tuple[dict[str, str], list[str]]:
-    """Resolve channel names via the profile's channel_directory.json → (found, missing)."""
+    """Resolve channel names via the profile's channel_directory.json → (found, missing).
+    Names are matched on slugs so decorated live names satisfy plain config names."""
     directory_path = profile / "channel_directory.json"
     if not directory_path.exists():
         raise FileNotFoundError(
@@ -54,12 +74,12 @@ def channel_ids(profile: Path, names: list[str]) -> tuple[dict[str, str], list[s
         )
     directory = json.loads(directory_path.read_text(encoding="utf-8"))
     name_to_id = {
-        c["name"]: c["id"]
+        channel_slug(c["name"]): c["id"]
         for c in directory.get("platforms", {}).get("discord", [])
-        if c.get("type") == "channel"
+        if c.get("type") == "channel" and c.get("name")
     }
-    found = {n: name_to_id[n] for n in names if n in name_to_id}
-    missing = [n for n in names if n not in name_to_id]
+    found = {n: name_to_id[channel_slug(n)] for n in names if channel_slug(n) in name_to_id}
+    missing = [n for n in names if channel_slug(n) not in name_to_id]
     return found, missing
 
 
