@@ -331,8 +331,18 @@ later; the onboarding channel keeps an explicit @everyone ALLOW — the only ope
 
 **Verify:** a role-less test account joining fresh sees ONLY #onboarding (screenshot-level
 check — the 2026-07-23 lesson is that reading back category overwrites is NOT proof).
+The Step 9 throwaway-account join doubles as this check.
 
-**Live run:** ⏳ I Am Joy — pending.
+**Live run:** 🔄 2026-08-04 I Am Joy — operator chose NOT to grandfather role-less
+members (the dry run then showed the base role already had View off — the server was
+already Vaulty-gated, so that choice costs nothing). Plan: grant sight to `Onboarded`
++ `Ascend Team` (Creator/bot already sighted), gate 8 categories/orphans incl. the
+onboarding door and the ops channel (staff+bot only — exception shipped this run),
+7 private categories left untouched, zero leaky children. BLOCKED pre-apply by the
+fenced-category guard: 👥 Community, 🏠 Home, 🎓 Free Mentorship deny @everyone with
+no bot allow — the bot can neither manage NOR READ them (the sweep needs Community!).
+Operator must add the bot's role → View Channel on those three categories; apply
+refuses (exit 1) until then, so nothing partial was written.
 
 ---
 
