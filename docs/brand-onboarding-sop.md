@@ -333,7 +333,7 @@ later; the onboarding channel keeps an explicit @everyone ALLOW — the only ope
 check — the 2026-07-23 lesson is that reading back category overwrites is NOT proof).
 The Step 9 throwaway-account join doubles as this check.
 
-**Live run:** 🔄 2026-08-04 I Am Joy — operator chose NOT to grandfather role-less
+**Live run:** ✅ 2026-08-04 I Am Joy — operator chose NOT to grandfather role-less
 members (the dry run then showed the base role already had View off — the server was
 already Vaulty-gated, so that choice costs nothing). Plan: grant sight to `Onboarded`
 + `Ascend Team` (Creator/bot already sighted), gate 8 categories/orphans incl. the
@@ -353,7 +353,8 @@ member sees all 18 community channels. One more unsynced-children strike: the bo
 category grants did NOT reach the engaged channels (own overwrites) — bot read 403 on
 all five; operator adds Ace's role per-CHANNEL (View + Read History + Send) on the six
 engaged/post channels. Never "Sync to category" — it would erase Vaulty's per-channel
-role allows.
+role allows. CLOSED after the operator's per-channel grants: all six engaged/post
+channels verified view=Y send=Y history=Y by computation AND live reads OK.
 
 ---
 
