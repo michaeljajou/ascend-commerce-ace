@@ -162,12 +162,29 @@ def plan_roles(existing: list[dict], wanted: list[str], bot_top_position: int) -
     return {"create": create, "present": present, "misplaced": misplaced}
 
 
+# Live servers decorate channel names ('📢│announcements', '🚽︱spam') and gateway
+# directories qualify them ('Test Brand / #community-chat'). Operators write plain
+# names. All matching goes through one slug so the three shapes agree — the I Am Joy
+# dry run (2026-08-04) nearly created seven duplicates of channels that existed.
+_NAME_SEPARATORS = ("/", "│", "︱", "┃", "|")
+
+
+def channel_slug(name: str) -> str:
+    for sep in _NAME_SEPARATORS:
+        if sep in name:
+            name = name.rsplit(sep, 1)[1]
+    name = name.strip().lstrip("#")
+    while name and not name[0].isalnum():
+        name = name[1:]
+    return name.casefold()
+
+
 def plan_channels(existing: list[dict], wanted: list[str]) -> dict:
     """Which wanted TEXT channels to create. Voice/category namesakes don't count."""
-    have = {c["name"].casefold() for c in existing if c.get("type") == TEXT_CHANNEL}
+    have = {channel_slug(c["name"]) for c in existing if c.get("type") == TEXT_CHANNEL}
     names = [w.lstrip("#") for w in wanted]
-    return {"create": [n for n in names if n.casefold() not in have],
-            "present": [n for n in names if n.casefold() in have]}
+    return {"create": [n for n in names if channel_slug(n) not in have],
+            "present": [n for n in names if channel_slug(n) in have]}
 
 
 def main(argv: list[str] | None = None) -> int:

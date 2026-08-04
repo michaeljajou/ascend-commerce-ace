@@ -35,6 +35,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # → sibling setup.py
+from prep_server import channel_slug  # noqa: E402 — one slug rule for all name matching
 from setup import (  # noqa: E402
     CHANNEL_DIR_END,
     CHANNEL_DIR_START,
@@ -94,7 +95,7 @@ def ensure_onboarding_channel(profile: Path, ace_cfg: dict, name_to_id: dict[str
     """
     ob = ace_cfg.get("onboarding") or {}
     name = str(ob.get("channel_name") or ONBOARDING_CHANNEL_NAME)
-    if existing := name_to_id.get(name):
+    if existing := name_to_id.get(channel_slug(name)):
         return existing
 
     token = bot_token(profile)
@@ -177,7 +178,11 @@ def main(argv: list[str] | None = None) -> int:
 
     directory = json.loads(directory_path.read_text(encoding="utf-8"))
     discord_channels = directory.get("platforms", {}).get("discord", [])
-    name_to_id = {c["name"]: c["id"] for c in discord_channels if c.get("type") == "channel"}
+    # Keys are SLUGS: directory names arrive decorated ('📢│announcements') or
+    # guild-qualified ('Brand / #community-chat'), while the spec/config carry the
+    # plain names operators type. channel_slug makes all three shapes one key.
+    name_to_id = {channel_slug(c["name"]): c["id"]
+                  for c in discord_channels if c.get("type") == "channel"}
     if not name_to_id:
         print("No channels in the directory — is the bot actually in the server yet?", file=sys.stderr)
         return 1
@@ -189,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     # SOLE exception: the hidden #onboarding parent channel (when onboarding is enabled) —
     # its private threads inherit free-response, making the onboarding conversation
     # work without @mentions, while every public channel stays mention-only.
-    missing = sorted(free_response_names - name_to_id.keys())
+    missing = sorted(n for n in free_response_names if channel_slug(n) not in name_to_id)
     if missing:
         print(f"WARNING: engaged channel(s) not yet seen by the bot: {missing}", file=sys.stderr)
     discord_block = config.setdefault("discord", {})
@@ -212,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # 2. home channel → profile .env (proactive output: cron results, notifications)
     home_name = str(ace_discord.get("home_channel") or DEFAULT_HOME_CHANNEL)
-    home_id = name_to_id.get(home_name)
+    home_id = name_to_id.get(channel_slug(home_name))
     if home_id:
         ensure_env(profile, {
             "DISCORD_HOME_CHANNEL": home_id,

@@ -45,6 +45,28 @@ def test_intent_summary_accepts_limited_flags():
     assert prep.intent_summary(0) == {"server_members": False, "message_content": False}
 
 
+def test_channel_slug_survives_live_naming_fashions():
+    """Shapes seen in production: emoji + U+2502 box bar, emoji + U+FE31 vertical dash,
+    guild-qualified directory display names, and plain operator input. All must land
+    on the same key — the I Am Joy dry run nearly created seven duplicates."""
+    assert prep.channel_slug("📢│announcements") == "announcements"
+    assert prep.channel_slug("❓│how-to-level-up") == "how-to-level-up"
+    assert prep.channel_slug("🚽︱spam") == "spam"
+    assert prep.channel_slug("Test Brand / #community-chat") == "community-chat"
+    assert prep.channel_slug("#agent-ace") == "agent-ace"
+    assert prep.channel_slug("agent-ace") == "agent-ace"
+
+
+def test_plan_channels_matches_emoji_decorated_names():
+    existing = [
+        {"id": "1", "name": "📢│announcements", "type": 0},
+        {"id": "2", "name": "💬│community-chat", "type": 0},
+    ]
+    plan = prep.plan_channels(existing, ["announcements", "community-chat", "agent-ace"])
+    assert plan["create"] == ["agent-ace"]
+    assert plan["present"] == ["announcements", "community-chat"]
+
+
 def test_missing_permissions_unions_roles_and_respects_admin():
     """The bot's effective guild perms are the union of its roles PLUS the @everyone
     base; Administrator short-circuits everything. A bot can't self-escalate, so what's
