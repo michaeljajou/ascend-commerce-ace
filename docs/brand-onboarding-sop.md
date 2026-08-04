@@ -376,7 +376,12 @@ channels verified view=Y send=Y history=Y by computation AND live reads OK.
 **Verify:** every arrow above observed for real; `onboarding.py trace --handle @<test>`
 shows the completed run; no FAILED cron rows in the scheduler.
 
-**Live run:** ⏳ I Am Joy — pending.
+**Live run:** 🔄 2026-08-04 I Am Joy — operator chose to launch directly in PROD mode
+(no test-mode: it only compresses the two onboarding timers, and the happy path +
+community QA don't need it). All five crons resumed, gateway up as uid 10000. The
+throwaway-account walk-through (fresh join → gate proof → onboarding → community QA)
+runs against the live system with real timers — sweep replies land ~10–12 min after
+an untagged question.
 
 ---
 
