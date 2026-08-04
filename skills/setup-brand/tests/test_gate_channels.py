@@ -123,6 +123,23 @@ def test_leaky_child_channels_are_detected():
     assert leaks == ["leaky"]                      # onboarding is meant to be open
 
 
+def test_home_channel_id_reads_env(tmp_path):
+    """#agent-ace is team-facing (cron output, notifications): the gate excludes the
+    creator-role allows there — an onboarded creator sees the community, not Ace's ops
+    feed. The id comes from .env, where resolve_channels wrote it."""
+    (tmp_path / ".env").write_text("X=1\nDISCORD_HOME_CHANNEL='1534255'\n", encoding="utf-8")
+    assert gate.home_channel_id(tmp_path) == "1534255"
+    assert gate.home_channel_id(tmp_path / "nope") is None
+    ows = by_id(gate.plan_overwrites({"id": "1534255", "name": "agent-ace",
+                                      "permission_overwrites": []},
+                                     guild_id=GUILD, creator_role_ids=[],  # ops: no creators
+                                     staff_role_id=STAFF, onboarding_id=ONBOARDING,
+                                     opening=False, bot_role_id=BOT))
+    assert ows[GUILD] == (0, gate.VIEW_CHANNEL)
+    assert ows[STAFF] == (gate.VIEW_CHANNEL, 0) and ows[BOT] == (gate.VIEW_CHANNEL, 0)
+    assert "r_onboarded" not in ows and "r_creator" not in ows
+
+
 def test_bot_allow_and_everyone_deny_land_in_one_patch():
     """On a fresh server the gate and the bot's own allow are written together, so the
     bot can never fence itself out of the category it just gated."""

@@ -75,6 +75,21 @@ def bot_token(profile: Path) -> str | None:
     return None
 
 
+def home_channel_id(profile: Path) -> str | None:
+    """The brand's #agent-ace ops channel (resolve_channels writes its id to .env).
+
+    Team-facing: cron output and notifications land there, so the gate gives it
+    staff+bot overwrites WITHOUT the creator-role allows — an onboarded creator should
+    see the community, not Ace's ops feed (I Am Joy live run, 2026-08-04)."""
+    env_path = profile / ".env"
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if s.startswith("DISCORD_HOME_CHANNEL="):
+                return s.split("=", 1)[1].strip().strip("'\"") or None
+    return None
+
+
 def is_already_private(channel: dict, guild_id: str, creator_role_ids: list[str]) -> bool:
     """True when a place is deliberately locked down TIGHTER than the gate: @everyone
     is denied and creators are not allowed (e.g. a Paid Collab category holding private
@@ -321,9 +336,12 @@ def main(argv: list[str] | None = None) -> int:
                   "it in Discord by hand.", file=sys.stderr)
             roles_failed.append(rc["name"])
 
+    home_id = home_channel_id(profile)
     changed = 0
     for channel in sorted(targets, key=lambda c: c.get("position", 0)):
-        desired = plan_overwrites(channel, guild_id=guild_id, creator_role_ids=creator_role_ids,
+        # The ops/home channel is gated WITHOUT creator allows — staff + bot only.
+        chan_creator_ids = [] if channel["id"] == home_id else creator_role_ids
+        desired = plan_overwrites(channel, guild_id=guild_id, creator_role_ids=chan_creator_ids,
                                   staff_role_id=staff_role_id, onboarding_id=onboarding_id,
                                   opening=args.open, bot_role_id=bot_role_id)
         current = channel.get("permission_overwrites", [])
@@ -333,7 +351,8 @@ def main(argv: list[str] | None = None) -> int:
         if same:
             continue
         changed += 1
-        note = " (onboarding door — stays visible)" if channel["id"] == onboarding_id else ""
+        note = (" (onboarding door — stays visible)" if channel["id"] == onboarding_id
+                else " (ops channel — staff+bot only)" if channel["id"] == home_id else "")
         if not args.apply:
             print(f"  would {verb.lower()} {label}{note}")
             continue
