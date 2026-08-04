@@ -52,8 +52,11 @@ PERMS = {
     "view_channel": 1 << 10, "send_messages": 1 << 11, "embed_links": 1 << 14,
     "read_message_history": 1 << 16, "mention_everyone": 1 << 17, "add_reactions": 1 << 6,
     "manage_channels": 1 << 4, "manage_roles": 1 << 28, "manage_threads": 1 << 34,
-    "create_private_threads": 1 << 36, "send_messages_in_threads": 1 << 38,
-    "change_nickname": 1 << 26,
+    # BOTH thread-creation bits: the onboarding channel's overwrites DENY public
+    # threads to @everyone, and Discord 403s (50013) any overwrite touching a
+    # permission the bot itself doesn't hold — caught live on I Am Joy, 2026-08-04.
+    "create_public_threads": 1 << 35, "create_private_threads": 1 << 36,
+    "send_messages_in_threads": 1 << 38, "change_nickname": 1 << 26,
 }
 
 # Application flags: for each privileged intent Discord sets the plain bit once the bot

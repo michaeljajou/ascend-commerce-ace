@@ -66,10 +66,12 @@ brands (server nickname disambiguates if Discord forces a suffix).
    privileged toggles; Save). Message Content = bot can read messages at all; Server
    Members = the onboarding join poll and role lookups.
 3. **Bot** tab → **Reset Token** → copy it somewhere safe for Step 3. It is shown once.
-4. **OAuth2 → URL Generator** → scope `bot` → permissions: **Manage Roles, Manage
-   Channels, Manage Threads, View Channels, Send Messages, Send Messages in Threads,
-   Create Private Threads, Read Message History, Add Reactions, Embed Links, Mention
-   Everyone** → open the generated URL → invite the bot into the brand's server.
+4. **OAuth2 → URL Generator** → scope `bot` — or skip the checkbox hunt: the exact URL
+   with every needed permission is printed by `prep_server.py` (its `PERMS` table is
+   the single source of truth; notably it includes BOTH thread-creation bits — the
+   onboarding channel's overwrites deny public threads, and Discord 403s any overwrite
+   touching a permission the bot doesn't hold). Open the URL → pick the brand's server
+   → Authorize.
 
 **Verify:** bot appears (offline) in the server member list. Intents are re-verified
 programmatically at Step 3 via `GET /applications/@me` flags once the token is on the VPS.
