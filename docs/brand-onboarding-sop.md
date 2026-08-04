@@ -165,7 +165,18 @@ zero-guild error now prints the exact invite URL as the fix.
 **Verify:** re-run the dry-run — `create` lists empty, both intents `true`, no
 `misplaced` roles.
 
-**Live run:** ⏳ I Am Joy — pending (blocked on the Step 2 token drop).
+**Live run:** ✅ 2026-08-04 I Am Joy (scripted half) — this is the LIVE community
+(150+ per-creator channels, Vaulty visibly active). Three catches, all now encoded:
+(1) all six brand channels existed under emoji-decorated names (`📢│announcements`) —
+exact-name matching would have created seven duplicates; channel matching now goes
+through `channel_slug` (e39cc33), which also future-proofs resolve_channels.
+(2) Vaulty's `Onboarded`/`Creator` roles already exist — ADOPTED rather than
+duplicated (assign_role + gate match case-insensitively); members holding them are
+pre-grandfathered for the Step 8 gate. Both sit ABOVE the bot → operator drag needed.
+(3) `/applications/@me` reported BOTH intents OFF despite Step 1 — portal toggles
+hadn't stuck. Applied: `#agent-ace` + `Ascend Team` created, nickname `Ace` set,
+avatar already present (untouched), permissions complete, re-run is a no-op.
+Residue open: intent toggles, role drag, Ascend Team assignment, Vaulty off.
 
 ---
 
@@ -259,9 +270,12 @@ carry their own View) — category overwrites alone do NOT reach unsynced child 
 later; the onboarding channel keeps an explicit @everyone ALLOW — the only open door.
 
 **Do:**
-1. **Existing community only:** bulk-assign `creator` to every current human member FIRST
-   (`skills/run-onboarding/scripts/assign_role.py`) — otherwise applying the gate hides the
-   entire server from all of them at once. New joins from then on go through Ace.
+1. **Existing community only:** members already holding the adopted creator roles
+   (e.g. Vaulty's `Onboarded`/`Creator`) keep access automatically — the gate grants
+   view to those roles. The decision is about ROLE-LESS current members: bulk-assign
+   `creator` (`skills/run-onboarding/scripts/assign_role.py`) to grandfather them, or
+   leave them gated so they funnel through Ace onboarding. Decide with the operator
+   BEFORE `--apply` — the gate hides the server from role-less members instantly.
 2. Dry-run, then apply:
    ```
    python skills/setup-brand/scripts/gate_channels.py --profile-dir <profile_dir>
