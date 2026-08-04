@@ -11,8 +11,8 @@ A message is a CANDIDATE when ALL hold:
     they are the channels this sweep watches)
   - author is a creator: not a bot/webhook, not a team member (ace.discord.team_role)
   - it does not @mention Ace (mentions are answered instantly by the gateway)
-  - it is at least ace.discord.sweep_minutes old (default 5) — the team gets first right
-    of reply
+  - it is at least ace.discord.sweep_minutes old (default 10) — the team gets first
+    right of reply
   - no team member and no bot has posted in that channel after it
 
 State (<profile>/ace/sweep_state.json) tracks the last-seen message per channel — the
@@ -68,6 +68,33 @@ def bot_token(profile: Path) -> str | None:
 
 
 # ── pure candidate selection (unit-tested) ─────────────────────────────────────
+
+# Mirror of setup-brand/scripts/prep_server.channel_slug (canonical) — this script is
+# copied into <profile>/scripts/ by setup.py and must stay self-contained. Live servers
+# decorate channel names ('📢│announcements'); gateway directories qualify them
+# ('Brand / #community-chat'); config carries the plain names operators type. Exact-name
+# matching silently watched ZERO channels on such servers (I Am Joy, 2026-08-04).
+_NAME_SEPARATORS = ("/", "│", "︱", "┃", "|")
+
+
+def channel_slug(name: str) -> str:
+    for sep in _NAME_SEPARATORS:
+        if sep in name:
+            name = name.rsplit(sep, 1)[1]
+    name = name.strip().lstrip("#")
+    while name and not name[0].isalnum():
+        name = name[1:]
+    return name.casefold()
+
+
+def swept_channels(channel_names: list[str], directory: dict) -> dict[str, str]:
+    """Config's engaged-channel names → channel ids, matched on slugs."""
+    entries = directory.get("platforms", {}).get("discord", [])
+    name_to_id = {channel_slug(c["name"]): c["id"] for c in entries
+                  if c.get("type") == "channel" and c.get("name")}
+    return {n: name_to_id[channel_slug(n)] for n in channel_names
+            if channel_slug(n) in name_to_id}
+
 
 def parse_ts(iso: str) -> datetime:
     return datetime.fromisoformat(iso)
@@ -179,10 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     directory = json.loads(directory_path.read_text(encoding="utf-8"))
-    name_to_id = {c["name"]: c["id"]
-                  for c in directory.get("platforms", {}).get("discord", [])
-                  if c.get("type") == "channel"}
-    swept = {n: name_to_id[n] for n in channel_names if n in name_to_id}
+    swept = swept_channels(channel_names, directory)
 
     state_path = profile / "ace" / "sweep_state.json"
     state = load_state(state_path)

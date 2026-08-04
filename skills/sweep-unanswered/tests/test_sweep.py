@@ -12,6 +12,20 @@ NOW = datetime(2026, 7, 6, 12, 0, 0, tzinfo=timezone.utc)
 FIVE = timedelta(minutes=5)
 
 
+def test_swept_channels_match_decorated_directory_names():
+    """Live servers name channels '📢│announcements'; directories may qualify names
+    with the guild ('Brand / #community-chat'). Config carries plain names. Exact-name
+    matching silently watched ZERO channels on the I Am Joy server."""
+    directory = {"platforms": {"discord": [
+        {"id": "1", "name": "📢│announcements", "type": "channel"},
+        {"id": "2", "name": "I Am Joy / #community-chat", "type": "channel"},
+        {"id": "3", "name": "campaigns", "type": "channel"},
+        {"id": "4", "name": "community-chat", "type": "target"},   # non-channel: ignored
+    ]}}
+    got = sweep.swept_channels(["community-chat", "campaigns", "our-products"], directory)
+    assert got == {"community-chat": "2", "campaigns": "3"}       # our-products: not seen
+
+
 def msg(mid, content, *, author_id="creator1", username=None, bot=False,
         minutes_ago=10, mentions=(), webhook=False):
     m = {
