@@ -50,6 +50,7 @@ UA = "DiscordBot (https://github.com/michaeljajou/ascend-commerce-ace, 0.1)"
 # Discord permission bits (see the design note in ensure_onboarding_channel)
 VIEW_CHANNEL = 1 << 10
 SEND_MESSAGES = 1 << 11
+READ_MESSAGE_HISTORY = 1 << 16
 MANAGE_THREADS = 1 << 34
 CREATE_PUBLIC_THREADS = 1 << 35
 CREATE_PRIVATE_THREADS = 1 << 36
@@ -111,10 +112,12 @@ def ensure_onboarding_channel(profile: Path, ace_cfg: dict, name_to_id: dict[str
     me = _discord(token, "/users/@me")
 
     overwrites = [
-        {   # @everyone: may view (required to see their own private thread) + reply in threads,
-            # but never post at channel level or open threads themselves
+        {   # @everyone: may view (required to see their own private thread), read the
+            # thread's history (locked servers withhold it at the base role — without
+            # this a new member sees the thread but not one message inside it), and
+            # reply in threads — but never post at channel level or open threads
             "id": guild_id, "type": 0,
-            "allow": str(SEND_MESSAGES_IN_THREADS),
+            "allow": str(VIEW_CHANNEL | READ_MESSAGE_HISTORY | SEND_MESSAGES_IN_THREADS),
             "deny": str(SEND_MESSAGES | CREATE_PUBLIC_THREADS | CREATE_PRIVATE_THREADS),
         },
         {   # the bot: full working set for creating/managing the private threads

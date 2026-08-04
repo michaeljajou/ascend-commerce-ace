@@ -35,11 +35,15 @@ def test_public_channel_is_hidden_from_everyone_and_opened_to_creators():
 
 
 def test_onboarding_channel_keeps_the_door_open():
-    """New members must still see the onboarding channel — it's the only way in."""
+    """New members must still see the onboarding channel — it's the only way in —
+    AND read message history: locked servers withhold it at the base role, and
+    without it a new member sees their thread but not one message inside it
+    (I Am Joy walk-through, 2026-08-04)."""
     existing = [{"id": GUILD, "type": 0, "allow": "2048", "deny": "4096"}]   # send rules
     out = plan({"id": ONBOARDING, "name": "onboarding", "permission_overwrites": existing})
     everyone = next(o for o in out if o["id"] == GUILD)
     assert int(everyone["allow"]) & gate.VIEW_CHANNEL      # view added
+    assert int(everyone["allow"]) & gate.READ_MESSAGE_HISTORY   # history added
     assert int(everyone["allow"]) & 2048                   # prior send-in-threads preserved
     assert int(everyone["deny"]) == 4096                   # prior deny preserved
 

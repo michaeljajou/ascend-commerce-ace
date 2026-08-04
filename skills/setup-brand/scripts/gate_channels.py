@@ -45,6 +45,7 @@ from pathlib import Path
 DISCORD_API = "https://discord.com/api/v10"
 UA = "DiscordBot (https://github.com/michaeljajou/ascend-commerce-ace, 0.1)"
 VIEW_CHANNEL = 1 << 10
+READ_MESSAGE_HISTORY = 1 << 16
 ADMINISTRATOR = 1 << 3
 
 ROLE, MEMBER = 0, 1  # permission-overwrite types
@@ -187,14 +188,18 @@ def plan_overwrites(channel: dict, *, guild_id: str, creator_role_ids: list[str]
 
     if channel["id"] == onboarding_id or opening:
         # The onboarding channel (and every channel when --open) stays viewable by all.
-        everyone = {"id": guild_id, "type": ROLE, "allow": str(VIEW_CHANNEL), "deny": "0"}
+        # The DOOR needs Read Message History too: on servers whose base role withholds
+        # it (Vaulty-locked), a new member could see their onboarding thread but not one
+        # message inside it (I Am Joy walk-through, 2026-08-04).
+        door = VIEW_CHANNEL | (READ_MESSAGE_HISTORY if channel["id"] == onboarding_id else 0)
+        everyone = {"id": guild_id, "type": ROLE, "allow": str(door), "deny": "0"}
         if channel["id"] == onboarding_id:
             # Preserve the onboarding channel's own send-level rules, which
             # resolve_channels.py set up (view yes, post at channel level no).
             prior = next((o for o in channel.get("permission_overwrites", [])
                           if o["id"] == guild_id), None)
             if prior:
-                everyone = {**prior, "allow": str(int(prior.get("allow", 0)) | VIEW_CHANNEL)}
+                everyone = {**prior, "allow": str(int(prior.get("allow", 0)) | door)}
         return kept + [everyone]
 
     out = [{"id": guild_id, "type": ROLE, "allow": "0", "deny": str(VIEW_CHANNEL)}]
