@@ -343,6 +343,17 @@ fenced-category guard: 👥 Community, 🏠 Home, 🎓 Free Mentorship deny @eve
 no bot allow — the bot can neither manage NOR READ them (the sweep needs Community!).
 Operator must add the bot's role → View Channel on those three categories; apply
 refuses (exit 1) until then, so nothing partial was written.
+APPLY (after the category fix): base-role grants + #new-members + #agent-ace +
+#onboarding door landed. Five belt writes on Vaulty-walled structures failed 50013 —
+Discord requires the editor to hold every bit in the overwrite set being replaced, and
+Vaulty's walls carry bits the bot lacks there. EXPECTED on pre-walled servers; the
+acceptance test is COMPUTED effective visibility, not the write log: role-less member
+sees exactly [#onboarding, #welcome] (welcome-mat kept deliberately); Onboarded/Creator
+member sees all 18 community channels. One more unsynced-children strike: the bot's
+category grants did NOT reach the engaged channels (own overwrites) — bot read 403 on
+all five; operator adds Ace's role per-CHANNEL (View + Read History + Send) on the six
+engaged/post channels. Never "Sync to category" — it would erase Vaulty's per-channel
+role allows.
 
 ---
 
