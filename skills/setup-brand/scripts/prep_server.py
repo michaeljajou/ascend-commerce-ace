@@ -227,6 +227,13 @@ def main(argv: list[str] | None = None) -> int:
     role_plan = plan_roles(roles, args.roles, bot_top)
     channels = discord(token, f"/guilds/{gid}/channels")
     chan_plan = plan_channels(channels, ["agent-ace", *args.channels])
+    # The full inventory, for the reconcile step: when `create` is long but the server
+    # is not empty, the real channels exist under other names — rename or remap, don't
+    # blindly create a parallel set (I Am Joy live run, 2026-08-04).
+    inventory = {
+        "categories": sorted(c["name"] for c in channels if c.get("type") == 4),
+        "text_channels": sorted(c["name"] for c in channels if c.get("type") == TEXT_CHANNEL),
+    }
 
     # Look: nickname + avatar. The avatar is copied from an existing brand's bot only
     # when this bot has none — a deliberately-set custom face is never clobbered.
@@ -286,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
                         "invite_url": invite_url(str(app.get("id", me.get("id"))))},
         "roles": role_plan,
         "channels": chan_plan,
+        "existing": inventory,
         "errors": errors,
         "human_residue": human_residue,
     }, indent=2))
