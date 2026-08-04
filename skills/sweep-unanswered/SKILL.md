@@ -15,7 +15,7 @@ The brand's channels are **mention-only** at the gateway: Ace answers @mentions 
 instantly, and hears nothing else live — so team announcements never get an accidental reply.
 This skill is the other half: a **zero-token cron script** (`ace-sweep.py`, every 2 min)
 watches the engaged channels and wakes the agent ONLY when a creator message has gone
-unanswered by the team for the grace window (default 5 min). You are that woken agent.
+unanswered by the team for the grace window (default 10 min). You are that woken agent.
 
 ## When to Use
 You are invoked by the sweep cron job with a JSON payload of `unanswered_creator_messages`

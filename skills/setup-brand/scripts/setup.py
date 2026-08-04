@@ -147,7 +147,7 @@ def build_config(spec: dict) -> dict:
             # Reply gating: the team gets first right of reply; the ace-sweep.py cron
             # script (zero-token) wakes the agent only for creator messages the team
             # hasn't answered within sweep_minutes. team_role marks who "the team" is.
-            "sweep_minutes": int(d["discord"].get("sweep_minutes", 5)),
+            "sweep_minutes": int(d["discord"].get("sweep_minutes", 10)),
             "team_role": str(d["discord"].get("team_role") or d["team_role"]),
         },
         "classify_model": d["classify_model"],

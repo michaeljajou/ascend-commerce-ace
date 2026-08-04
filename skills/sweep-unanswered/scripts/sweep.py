@@ -94,7 +94,7 @@ def select_candidates(
     A later message by ANY responder (team member or bot — incl. Ace's own instant
     @mention replies) marks every earlier message in the channel as answered.
     Messages younger than the threshold stay pending: last_seen does not advance past
-    them, so the next tick re-evaluates once the team's 5 minutes are up.
+    them, so the next tick re-evaluates once the team's grace window is up.
     """
     msgs = sorted(messages, key=lambda m: int(m["id"]))
     answered_until: datetime | None = None  # latest responder timestamp
@@ -169,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     channel_names = (ace_discord.get("scoping") or {}).get("free_response") or []
     guild_id = str(ace_discord.get("guild_id") or "")
     team_role = ace_discord.get("team_role")  # name or numeric id
-    threshold = timedelta(minutes=int(ace_discord.get("sweep_minutes", 5)))
+    threshold = timedelta(minutes=int(ace_discord.get("sweep_minutes", 10)))
 
     token = bot_token(profile)
     directory_path = profile / "channel_directory.json"

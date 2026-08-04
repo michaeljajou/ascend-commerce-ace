@@ -218,14 +218,14 @@ def test_upsert_channel_directory_replaces_in_place():
 
 def test_build_config_sweep_and_team_role():
     cfg = setup.build_config(make_spec())
-    assert cfg["discord"]["sweep_minutes"] == 5              # default grace window
+    assert cfg["discord"]["sweep_minutes"] == 10             # default grace window
     assert cfg["discord"]["team_role"] == "Ascend Team"      # bundle default, all brands
     spec = make_spec()
     spec["discord"]["team_role"] = "Other Team"
-    spec["discord"]["sweep_minutes"] = 10
+    spec["discord"]["sweep_minutes"] = 3
     cfg = setup.build_config(spec)
     assert cfg["discord"]["team_role"] == "Other Team"
-    assert cfg["discord"]["sweep_minutes"] == 10
+    assert cfg["discord"]["sweep_minutes"] == 3
 
 
 def test_build_cronjobs_includes_zero_token_sweep():

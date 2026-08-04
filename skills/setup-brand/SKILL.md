@@ -109,7 +109,7 @@ there is no ingest/embedding step.
    (`ace-sweep.py` is installed into `<profile>/scripts/` by `setup.py`. Team members are
    identified by the **"Ascend Team"** Discord role — the default in every brand; override
    with `discord.team_role` in the spec. Role-holders are never swept, and their reply
-   within the grace window, default 5 min, releases Ace from answering.)
+   within the grace window, default 10 min, releases Ace from answering.)
 3a. **Security hardening is applied automatically** by `setup.py` on every run: `approvals.mode: smart`, `approvals.cron_mode: approve`, `code_execution.mode: strict`, a `command_allowlist` scoped to this brand's own scripts, `session_reset: idle` (60 min), the brand's Discord toolset reduced to `code_execution` + `file` + `vision`, both background-review nudges off (`skills.creation_nudge_interval: 0`, `memory.nudge_interval: 0`), and every `display.*` chatter channel silenced so nothing operational leaks into Discord. Do not hand-edit these away without discussing with the operator — the next `setup-brand` re-run restores them.
 
    Two of these have bitten us and are worth knowing by name. `cron_mode` must never be
