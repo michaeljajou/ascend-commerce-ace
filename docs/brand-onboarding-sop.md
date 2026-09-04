@@ -383,6 +383,23 @@ throwaway-account walk-through (fresh join → gate proof → onboarding → com
 runs against the live system with real timers — sweep replies land ~10–12 min after
 an untagged question.
 
+**Catches from the first month live (read from the profile's `state.db` sweep sessions and
+the channels themselves, 2026-09-04):** (1) the brand posts every campaign and announcement
+through a Discord **webhook** ("I Am Joy Brand"), text inside an embed — `get-campaigns`
+dropped webhook posts as bots and empty-content posts as blank, so `#campaigns` read
+`active: null` with a live monthly campaign up (2026-08-28, 2026-09-03) and two creators were
+told nothing was running; the Growi "Mega Campaign" also lived only in `#announcements`,
+which the script never read. Fixed: webhook posts count as team posts, embeds are read,
+`#announcements` is fetched as a `recent` feed. (2) Both sweep replies went through
+`reply.py --text "..."` in the terminal tool: bash left `\n` literal and ate `$5` from `$50`
+("win 0!"). Fixed: text goes over stdin in a quoted heredoc; `reply.py` repairs `\n`.
+(3) Neither reply tagged the creator — `allowed_mentions` without `replied_user` and a bare
+username in the text. Fixed: `replied_user: true`, the payload carries `author_id`/`mention`,
+`reply.py --mention`. (4) The 2026-09-03 escalation never reached Slack: the agent guessed
+`<bundle>/_lib/…` without `skills/`, found nothing, gave up. Fixed: the sweep payload lists
+the scripts by absolute path. Deploy note: `ace-sweep.py` is a COPY in `<profile>/scripts/`
+— a `git pull` alone does not update it; re-copy it (or re-run setup.py) per brand.
+
 ---
 
 ## Step 10 — Go live + first-week watch

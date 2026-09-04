@@ -3,19 +3,31 @@
 
 Launch-by-posting convention: the team launches a campaign/challenge simply by
 posting it in #campaigns / #challenges — the NEWEST post in each channel IS the
-active one. This script reads those channels through the Discord API so Ace is
-always grounded in what's actually running, with no manual knowledge.yaml update
-per launch.
+active one. #announcements is read too, as a MIXED feed: campaign notices (the
+Growi sign-up link, date changes, weekly leaderboards) land there between unrelated
+announcements, so its recent posts are returned for scanning, not ranked
+newest-is-active.
 
-Deterministic grounding only — no interpretation. Prints JSON: per channel the
-`active` post (newest with text content) and the `previous` ones. Empty channel
-→ active is null (the never-fabricate signal: escalate, don't guess).
+Deterministic grounding only — no interpretation. Prints JSON: per launch channel
+the `active` post (newest with text) and the `previous` ones; per mixed channel the
+`recent` posts. Empty channel → active is null (the never-fabricate signal: escalate,
+don't guess).
+
+What counts as a team post: any human author, and any WEBHOOK post. Brands post
+through webhooks — I Am Joy's "I Am Joy Brand" webhook posts every campaign and
+announcement, text inside a rich embed — and Discord flags those as bot-authored.
+Treating them as bots returned `active: null` for #campaigns with a live monthly
+campaign on the board (2026-08-28 and 2026-09-03): Ace told two creators there was
+no active campaign. Non-webhook bots (Ace's own replies) are still excluded. A
+post's text is its content plus its rich embeds (title, description, fields,
+footer); link-preview embeds are noise and skipped; image-only posts carry no
+readable text and are skipped, but attachments on text posts are listed by URL.
 
 Requires: the profile's channel_directory.json (exists after the gateway's first
 Discord connect) and DISCORD_BOT_TOKEN (env, or read from the profile .env).
 
 Usage:
-    python fetch.py [--profile-dir <dir>] [--channels campaigns,challenges] [--limit 10]
+    python3 fetch.py [--profile-dir <dir>] [--channels campaigns,challenges,announcements] [--limit 10]
 """
 from __future__ import annotations
 
@@ -25,10 +37,16 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 DISCORD_API = "https://discord.com/api/v10"
-DEFAULT_CHANNELS = "campaigns,challenges"
+DEFAULT_CHANNELS = "campaigns,challenges,announcements"
+# Mixed feeds: many kinds of posts, so the newest one is not "the active campaign".
+MIXED_CHANNELS = {"announcements"}
+# Embed types Discord generates itself for links in the text (site previews) — never
+# something the team wrote.
+_PREVIEW_EMBED_TYPES = {"article", "link", "video", "image", "gifv"}
 
 
 def bot_token(profile: Path) -> str | None:
@@ -93,23 +111,76 @@ def fetch_messages(token: str, channel_id: str, limit: int) -> list[dict]:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def summarize(messages: list[dict]) -> dict:
-    """Newest text post = active; the rest = previous.
+def embed_text(embed: dict) -> str:
+    """The readable text of a rich embed: title, description, `name: value` fields, footer."""
+    if (embed.get("type") or "rich") in _PREVIEW_EMBED_TYPES:
+        return ""
+    parts = []
+    if embed.get("title"):
+        parts.append(str(embed["title"]).strip())
+    if embed.get("description"):
+        parts.append(str(embed["description"]).strip())
+    for field in embed.get("fields") or []:
+        name = str(field.get("name") or "").strip()
+        value = str(field.get("value") or "").strip()
+        if name and value:
+            parts.append(f"{name}: {value}")
+        elif name or value:
+            parts.append(name or value)
+    footer = (embed.get("footer") or {}).get("text")
+    if footer:
+        parts.append(str(footer).strip())
+    return "\n".join(p for p in parts if p)
 
-    Ignores empty/attachment-only posts AND bot-authored ones — Ace's own replies
-    (or any other bot) in the channel must never be mistaken for the campaign.
+
+def post_text(message: dict) -> str:
+    """Everything the team wrote in a post: its content plus its rich embeds."""
+    parts = [(message.get("content") or "").strip()]
+    parts += [embed_text(e) for e in message.get("embeds") or []]
+    return "\n\n".join(p for p in parts if p).strip()
+
+
+def is_team_post(message: dict) -> bool:
+    """Humans and webhooks are the team; other bots (Ace's own replies) are not."""
+    if message.get("webhook_id"):
+        return True
+    return not (message.get("author") or {}).get("bot")
+
+
+def summarize(messages: list[dict], *, mode: str = "launch") -> dict:
+    """Launch mode: newest text post = active, the rest = previous.
+    Recent mode (mixed feeds): every text post, newest first, for the agent to scan.
+
+    Ignores posts with no readable text (image-only) and non-webhook bot posts — Ace's
+    own replies in the channel must never be mistaken for the campaign.
     """
     posts = []
     for m in messages:
-        content = (m.get("content") or "").strip()
-        if not content or (m.get("author") or {}).get("bot"):
+        text = post_text(m)
+        if not text or not is_team_post(m):
             continue
-        posts.append({
+        post = {
             "posted_at": m.get("timestamp"),
             "author": (m.get("author") or {}).get("username"),
-            "content": content,
-        })
+            "content": text,
+        }
+        urls = [a.get("url") for a in m.get("attachments") or [] if a.get("url")]
+        if urls:
+            post["attachments"] = urls
+        posts.append(post)
+    if mode == "recent":
+        return {"recent": posts}
     return {"active": posts[0] if posts else None, "previous": posts[1:]}
+
+
+NOTE = (
+    "Launch channels (campaigns, challenges): the ACTIVE campaign/challenge is the newest post; "
+    "`previous` is history only. Mixed feeds (announcements): `recent` posts are returned for "
+    "scanning — campaign notices sit between unrelated announcements, and newest does not mean "
+    "active. Answer only from these posts, as literally stated (dates, prizes, links); check a "
+    "post's campaign dates against fetched_at before calling it running or ended. If nothing here "
+    "covers the question, escalate — don't guess."
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -139,15 +210,16 @@ def main(argv: list[str] | None = None) -> int:
 
     channels = {}
     for name, cid in found.items():
+        mode = "recent" if channel_slug(name) in MIXED_CHANNELS else "launch"
         try:
-            channels[name] = summarize(fetch_messages(token, cid, args.limit))
+            channels[name] = summarize(fetch_messages(token, cid, args.limit), mode=mode)
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
             print(f"ERROR: could not fetch #{name}: {exc}", file=sys.stderr)
             return 1
 
     print(json.dumps({
-        "note": "The ACTIVE campaign/challenge is the newest post in each channel. "
-                "Answer only from these posts; if active is null, escalate — don't guess.",
+        "note": NOTE,
+        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "channels": channels,
         "missing_channels": missing,
     }, indent=2))

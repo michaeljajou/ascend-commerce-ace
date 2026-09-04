@@ -180,6 +180,11 @@ def test_second_run_surfaces_unanswered_and_advances_state(tmp_path, monkeypatch
     surfaced = payload["unanswered_creator_messages"]
     assert [c["message_id"] for c in surfaced] == ["101"]   # creator surfaced, team post not
     assert surfaced[0]["channel"] == "community-chat"
+    # The reply must tag the creator, so the agent gets the id and the ready-made tag —
+    # a bare username ("Hey tesh.oneal") notifies nobody (I Am Joy, 2026-09-03).
+    assert surfaced[0]["author"] == "creator1"
+    assert surfaced[0]["author_id"] == "creator1"
+    assert surfaced[0]["mention"] == "<@creator1>"
     state = json.loads((tmp_path / "ace" / "sweep_state.json").read_text())
     assert state["channels"]["555"] == "102"                # consumed both
     assert state["members"]["team1"]["team"] is True        # membership cached
@@ -201,3 +206,37 @@ def test_unwired_profile_is_silent_not_fatal(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
     assert sweep.main(["--profile-dir", str(tmp_path)]) == 0
     assert json.loads(capsys.readouterr().out.strip()) == {"wakeAgent": False}
+
+
+def test_payload_names_the_scripts_by_absolute_path(tmp_path, monkeypatch, capsys):
+    """The woken agent guessed `<bundle>/_lib/log_cli.py` (no `skills/`), searched, found
+    nothing, and declared the Slack tooling "not present in this deployment" — the tesh.oneal
+    escalation never reached Slack (I Am Joy, 2026-09-03). The bundle is registered in
+    skills.external_dirs; hand the agent exact paths instead."""
+    import yaml
+    make_profile(tmp_path)
+    bundle = tmp_path / "bundle" / "skills"
+    for rel in ("sweep-unanswered/scripts/reply.py", "_lib/slack_cli.py", "_lib/log_cli.py",
+                "get-campaigns/scripts/fetch.py", "get-knowledge/scripts/get.py"):
+        (bundle / rel).parent.mkdir(parents=True, exist_ok=True)
+        (bundle / rel).write_text("# stub\n", encoding="utf-8")
+    cfg = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    cfg["skills"] = {"external_dirs": ["/nonexistent/skills", str(bundle)]}
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    (tmp_path / "ace").mkdir()
+    (tmp_path / "ace" / "sweep_state.json").write_text(json.dumps({
+        "channels": {"555": "100"}, "members": {}, "bot_user_id": "ace-bot", "team_role_id": "r1",
+    }))
+    out = run(tmp_path, monkeypatch, capsys, {
+        "/channels/555/messages?after=100": [msg(101, "how do I join?", minutes_ago=7)],
+        "/guilds/g1/members/creator1": {"roles": []},
+    })
+    payload = json.loads(out)
+    assert payload["scripts"] == {
+        "reply": str(bundle / "sweep-unanswered/scripts/reply.py"),
+        "slack": str(bundle / "_lib/slack_cli.py"),
+        "log": str(bundle / "_lib/log_cli.py"),
+        "campaigns": str(bundle / "get-campaigns/scripts/fetch.py"),
+        "knowledge": str(bundle / "get-knowledge/scripts/get.py"),
+    }
+    assert "python3" in payload["instructions"]

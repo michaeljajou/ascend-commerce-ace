@@ -19,6 +19,11 @@ State (<profile>/ace/sweep_state.json) tracks the last-seen message per channel 
 first run initializes to "now" (no backfill) — plus the resolved team-role id, bot user
 id, and a per-author team-membership cache.
 
+The payload hands the agent everything a reply needs and nothing it has to guess:
+each candidate carries the author's id and ready-made <@id> tag (a bare username
+in the reply — "Hey tesh.oneal" — tags nobody), and `scripts` lists the bundle's
+scripts by absolute path (see script_paths).
+
 NOTE: this file is copied to <profile>/scripts/ace-sweep.py by setup.py (Hermes only
 runs cron scripts from the profile's scripts/ dir) — it must stay self-contained
 (stdlib + PyYAML only, no _lib imports).
@@ -98,6 +103,31 @@ def swept_channels(channel_names: list[str], directory: dict) -> dict[str, str]:
 
 def parse_ts(iso: str) -> datetime:
     return datetime.fromisoformat(iso)
+
+
+# The woken agent runs the bundle's scripts by absolute path, and it has guessed wrong:
+# "<bundle>/_lib/log_cli.py" (no `skills/`), a search that found nothing, and the
+# conclusion that the Slack tooling "isn't present in this deployment" — the tesh.oneal
+# escalation never reached Slack (I Am Joy, 2026-09-03). The bundle is registered in
+# skills.external_dirs, so the paths are resolved here and handed over.
+SCRIPTS = {
+    "reply": "sweep-unanswered/scripts/reply.py",
+    "campaigns": "get-campaigns/scripts/fetch.py",
+    "knowledge": "get-knowledge/scripts/get.py",
+    "slack": "_lib/slack_cli.py",
+    "log": "_lib/log_cli.py",
+}
+
+
+def script_paths(config: dict) -> dict[str, str]:
+    """Absolute paths of the scripts the sweep-unanswered skill runs, from the first
+    skills.external_dirs entry that holds reply.py. Empty when none does."""
+    for entry in (config.get("skills") or {}).get("external_dirs") or []:
+        root = Path(str(entry))
+        found = {key: str(root / rel) for key, rel in SCRIPTS.items() if (root / rel).exists()}
+        if "reply" in found:
+            return found
+    return {}
 
 
 def is_bot_author(msg: dict) -> bool:
@@ -197,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     guild_id = str(ace_discord.get("guild_id") or "")
     team_role = ace_discord.get("team_role")  # name or numeric id
     threshold = timedelta(minutes=int(ace_discord.get("sweep_minutes", 10)))
+    scripts = script_paths(config)
 
     token = bot_token(profile)
     directory_path = profile / "channel_directory.json"
@@ -247,11 +278,14 @@ def main(argv: list[str] | None = None) -> int:
             if new_last_seen:
                 state["channels"][cid] = new_last_seen
             for m in picked:
+                author = m.get("author") or {}
                 all_candidates.append({
                     "channel": name,
                     "channel_id": cid,
                     "message_id": m["id"],
-                    "author": (m.get("author") or {}).get("username"),
+                    "author": author.get("username"),
+                    "author_id": author.get("id"),
+                    "mention": f"<@{author.get('id')}>",
                     "posted_at": m["timestamp"],
                     "content": (m.get("content") or "").strip(),
                 })
@@ -267,11 +301,18 @@ def main(argv: list[str] | None = None) -> int:
         print(SILENT)
         return 0
 
+    reply_cmd = f"python3 {scripts['reply']}" if scripts else "python3 reply.py"
+    slack_cmd = f"python3 {scripts['slack']}" if scripts.get("slack") else "python3 slack_cli.py"
     print(json.dumps({
         "unanswered_creator_messages": all_candidates,
+        "scripts": scripts,
         "instructions": "Handle per the sweep-unanswered skill: classify each; operational → "
-                        "grounded reply via reply.py; creative-strategy → escalate to Slack, NO "
-                        "channel reply; off-topic → skip. End your turn with only [SILENT].",
+                        f"grounded reply posted with `{reply_cmd} --channel-id <channel_id> "
+                        "--reply-to <message_id> --mention <author_id> --stdin <<'EOF'` (the text "
+                        "on stdin, greeting them with their `mention` tag); creative-strategy → "
+                        f"escalate to Slack with `{slack_cmd} post`, NO channel reply; off-topic → "
+                        "skip. Run scripts by the absolute paths in `scripts` — never search for "
+                        "them. End your turn with only [SILENT].",
     }, indent=2))
     return 0
 

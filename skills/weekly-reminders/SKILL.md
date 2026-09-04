@@ -24,15 +24,16 @@ brand's POST_ANSWER/POST_ONLY channel.
 ## Procedure
 1. Pull the current campaign/challenge live from Discord (newest team post = active):
    ```
-   python ${HERMES_SKILL_DIR}/../get-campaigns/scripts/fetch.py
+   python3 ${HERMES_SKILL_DIR}/../get-campaigns/scripts/fetch.py
    ```
 2. Fill a short reminder template (name, theme, how to participate, deadline, prizes) **using only**
    facts from the `active` posts.
 3. Post to the configured channel (Hermes cron delivery handles the target).
 
 ## Pitfalls
-- If `active` is null in both channels, **don't invent one** — skip the post (or post a generic
-  "join the community" nudge only if the brand allows).
+- If `active` is null in both launch channels, **don't invent one** — skip the post (or post a
+  generic "join the community" nudge only if the brand allows). `announcements.recent` is
+  context, not a launch: it may confirm a campaign is still running, never define one.
 - Never state prizes/deadlines not present in the active post.
 
 ## Verification

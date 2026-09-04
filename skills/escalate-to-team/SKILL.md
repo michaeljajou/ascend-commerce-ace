@@ -27,8 +27,9 @@ renegotiation, and escalated complaints.
 2. **Post to the team Slack channel** — all brands share it, and the script automatically
    prefixes your message with this brand's tag (`[<brand>]`), so just write the summary:
    ```
-   python ${HERMES_SKILL_DIR}/../_lib/slack_cli.py post --text "<summary>"
+   python3 ${HERMES_SKILL_DIR}/../_lib/slack_cli.py post --text "<summary>"
    ```
+   (In a sweep run, use the absolute path the payload gives you as `scripts.slack`.)
    Write plain text with simple bullets. The script translates formatting for Slack itself
    (`**bold**`, `### headers`, and Discord `<#id>` channel tags all come out right) — never
    hand-write Slack syntax.

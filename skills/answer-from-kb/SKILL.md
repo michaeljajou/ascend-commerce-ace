@@ -19,10 +19,10 @@ After `classify-question` returns **HANDLE**.
 
 ## Procedure
 1. **Current campaign/challenge questions** (what's running, deadline, prize, how to join) are
-   grounded by `get-campaigns` instead — the newest post in the brand's campaign channels is the
-   source of truth, not `knowledge.yaml`:
+   grounded by `get-campaigns` instead — the newest post in #campaigns / #challenges plus the
+   recent campaign notices in #announcements are the source of truth, not `knowledge.yaml`:
    ```
-   python ${HERMES_SKILL_DIR}/../get-campaigns/scripts/fetch.py
+   python3 ${HERMES_SKILL_DIR}/../get-campaigns/scripts/fetch.py
    ```
    Everything else, call `get-knowledge`:
    ```
