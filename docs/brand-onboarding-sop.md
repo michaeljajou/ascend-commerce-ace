@@ -501,6 +501,15 @@ running" — poll, don't trust the first read) → five crons resumed → join l
 re-attached within a minute; first sweep and onboarding ticks ran quiet (`wakeAgent=false`,
 zero API calls). Went live 14:32 ET with the OpenRouter balance at $8.56 and no top-up in
 sight — operator's call. Throwaway walk-through pending.
+🔄 2026-09-10 Prime Natural — same go-live pass, 15:50 ET: gateway connected as Ace#7309
+in ~9s (204 targets), five crons resumed, listener attached within the minute, first
+sweep tick quiet (`wakeAgent=false`). Post-live permission audit (overwrite map on the
+engaged channels + categories): grants carry only the bot's role; no stray member or
+role entries; `🏅│challenges` still has NO entry for the bot (Send missing — challenge
+posts need it) and keeps its @everyone View allow. The bot cannot read the guild audit
+log (no View Audit Log in the invite set) — before/after computed visibility is the
+evidence that no other role's sight changed. Walk-through pending; Vaulty-off not
+verifiable by API.
 
 **Catches from the first month live (read from the profile's `state.db` sweep sessions and
 the channels themselves, 2026-09-04):** (1) the brand posts every campaign and announcement
