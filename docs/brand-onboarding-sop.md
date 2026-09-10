@@ -49,6 +49,11 @@ sections; off-topic query returns empty.
 **Live run:** ✅ 2026-07-29 I Am Joy — validated both ends, staged at
 `/opt/data/staging/i-am-joy-knowledge.yaml`. Caught live: tabs + curly quotes from a
 rich-text editor, detached `- Description:` items, dedented compliance rule.
+✅ 2026-09-10 QBounce — same three faults again (tab-indented `- Description:` product
+item, tab + curly-quoted value props); fixed into `name`/`description` pairs, validated
+both ends (md5-identical), staged at `/opt/data/staging/qbounce-knowledge.yaml`. Left for
+the brand team: `compliance` is empty, and the payment FAQ covers campaign rewards but not
+the commission payout schedule.
 
 ---
 
@@ -122,6 +127,11 @@ one knowledge/creator store). Operator token drop verified: exactly one
 `DISCORD_BOT_TOKEN` line, five keys present. Bonus catch: the token was valid but the
 bot was in ZERO guilds — the Step 1 invite click had never been completed; the script's
 zero-guild error now prints the exact invite URL as the fix.
+✅ 2026-09-10 QBounce — shell created as **uid 10000** (`-u 10000 -e HOME=/opt/data`), so
+no chown is needed later; `--clone-from` copies only config.yaml/.env/SOUL.md/skills (no
+state.db, cron store, or data). Scrubbed the cloned token/home channel, repointed
+`ACE_DATA_DIR`, and also blanked the cloned `discord.free_response_channels` (test-brand's
+onboarding channel id) ahead of first connect. Operator token drop pending.
 
 ---
 
@@ -179,6 +189,16 @@ pre-grandfathered for the Step 8 gate. Both sit ABOVE the bot → operator drag 
 hadn't stuck. Applied: `#agent-ace` + `Ascend Team` created, nickname `Ace` set,
 avatar already present (untouched), permissions complete, re-run is a no-op.
 Residue open: intent toggles, role drag, Ascend Team assignment, Vaulty off.
+✅ 2026-09-10 QBounce (scripted half) — existing community on the same agency template
+(19 humans, Growi bot, per-creator channels, Vaulty roles). Dry run: both intents on first
+try, permissions complete, all six brand channels present under decorated names,
+`Ascend Team`/`Onboarded`/`Creator` all pre-existing and ALL above the bot's role
+(`Ace – Qbounce` sat at position 1 — bottom of the list). Applied: `#agent-ace` created,
+nickname `Ace` set, avatar already present; re-run is a no-op. Also found a pre-existing
+`onboarding` channel built for Vaulty (an `Onboarding` role sees it, @everyone cannot,
+no bot entry) — the resolver now adopts it and applies the door permissions (Step 5).
+Residue open: drag the bot's role above the three roles, assign Ascend Team (0 holders),
+Vaulty off.
 
 ---
 
@@ -217,6 +237,13 @@ channels by EXACT directory name and would have watched zero of this server's
 emoji-decorated channels — slug fix (0856ce3), test-brand's installed copy refreshed
 too. Root model/providers survived the merge (inherited from clone); hardening
 verified applied.
+✅ 2026-09-10 QBounce — spec mirrors I Am Joy's map with the six knowledge-file channels
+active (community-chat FULL_ACTIVE, our-products/how-to-level-up ANSWER,
+campaigns/challenges POST_ANSWER, announcements POST_ONLY), creator-wins/success-stories
+MONITOR_ONLY, everything else INACTIVE; per-creator channels left unlisted. setup.py run
+as uid 10000 (no chown needed); model inherited from the clone (`deepseek/deepseek-v4-flash`
+via OpenRouter, `fallback_providers: []`); hardening verified; foreign
+`onboarding.channel_id` dropped as designed.
 
 ---
 
@@ -231,6 +258,8 @@ verified applied.
    wires the mention-only gateway (`require_mention: true`), `DISCORD_HOME_CHANNEL`
    (#agent-ace), the SOUL.md channel directory, and the onboarding channel (creates
    #onboarding, binds it as the sole free-response channel, binds `run-onboarding`).
+   A server that already has an `onboarding` channel (Vaulty's) gets it ADOPTED by name,
+   with the door permissions applied per overwrite — Vaulty's own role entry is left alone.
 3. Do NOT restart the gateway for a brand still being onboarded — it stays down through
    Steps 6–8 and comes up at the Step 9 smoke test (see the pause/resume ops note).
    Gateway invocation on this box: `docker exec -d -u 10000 -e HOME=/opt/data hermes-ace
@@ -238,7 +267,8 @@ verified applied.
 
 **Verify:** `channel_directory.json` exists with N > 0 channels; `config.yaml` has
 `require_mention: true` and `ace.onboarding.channel_id`; SOUL.md channel map lists the
-real `<#id>`s.
+real `<#id>`s; `cronjobs.yaml` has `weekly-reminders` delivering to `discord:<numeric id>`
+(the script's `cron_deliver` summary line).
 
 **Live run:** ✅ 2026-08-04 I Am Joy — connected ~60s as uid 10000, directory built
 (178 channels, decorated names), stopped. Before first connect, scrubbed two more
@@ -287,6 +317,11 @@ hermes --profile <brand> cron create "every 2m" --name sweep-unanswered \
 ```
 Plus daily-digest and the other blueprint jobs (mirror the pilot brand's set:
 daily-digest, nudge-inactive, sweep-unanswered, onboarding-tick, weekly-reminders).
+**weekly-reminders takes its `--deliver` from the resolved `cronjobs.yaml`
+(`discord:<numeric id>`), never `discord:#name`** — Hermes resolves a name by exact
+directory match, so a decorated channel 404s on every run while the job reports "ok"
+(I Am Joy delivered nothing for a month; found 2026-09-10 via the ⚠ line in `cron list
+--all`). Fix a registered job in place: `cron edit <job_id> --deliver discord:<id>`.
 
 Gotchas (all bit): run cron commands as **`-u 10000 -e HOME=/opt/data`** — the cron
 store is HOME-relative, so jobs created as root live in a different store than the
@@ -399,6 +434,10 @@ username in the text. Fixed: `replied_user: true`, the payload carries `author_i
 `<bundle>/_lib/…` without `skills/`, found nothing, gave up. Fixed: the sweep payload lists
 the scripts by absolute path. Deploy note: `ace-sweep.py` is a COPY in `<profile>/scripts/`
 — a `git pull` alone does not update it; re-copy it (or re-run setup.py) per brand.
+(5) 2026-09-10: `weekly-reminders` had never delivered (name target vs decorated channel,
+see Step 7); repointed to the id and **left paused** until the operator reviews the
+composed output — the Sept 7 run prefixed the post with a data recap, so the skill now
+carries an output-only contract. Resume with `cron resume 7a30c4a702b0`.
 
 ---
 

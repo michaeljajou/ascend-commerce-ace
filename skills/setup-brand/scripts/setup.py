@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
+sys.path.insert(0, str(Path(__file__).resolve().parent))      # → sibling prep_server.py
 
 # Channel behaviors from the spec's channel map.
 BEHAVIORS = {
@@ -245,6 +246,44 @@ def build_cronjobs(spec: dict) -> list[dict]:
              "deliver": f"discord:#{post_target}"}
         )
     return jobs
+
+
+def load_channel_directory(profile: str | Path) -> dict[str, str]:
+    """slug → channel id from the gateway's channel_directory.json; {} before first connect.
+    Keys are SLUGS (see prep_server.channel_slug): directory names arrive decorated
+    ('📢│announcements') or guild-qualified ('Brand / #campaigns'), the spec carries plain names."""
+    path = Path(profile) / "channel_directory.json"
+    if not path.exists():
+        return {}
+    from prep_server import channel_slug
+
+    directory = json.loads(path.read_text(encoding="utf-8"))
+    channels = directory.get("platforms", {}).get("discord", [])
+    return {channel_slug(c["name"]): str(c["id"]) for c in channels if c.get("type") == "channel"}
+
+
+def resolve_cron_deliver(jobs: list[dict], name_to_id: dict[str, str]) -> list[str]:
+    """Rewrite `discord:#<name>` cron delivery targets to `discord:<id>` in place.
+
+    Hermes resolves a `discord:#name` target against the live directory by EXACT name, so a
+    decorated channel misses and delivery dies on int('#name') (I Am Joy, every run for a
+    month). The numeric id is the one form that always delivers. Returns the names the
+    directory doesn't know — those are left untouched for the caller to warn about."""
+    from prep_server import channel_slug
+
+    prefix = "discord:#"
+    unresolved: list[str] = []
+    for job in jobs:
+        deliver = job.get("deliver")
+        if not isinstance(deliver, str) or not deliver.startswith(prefix):
+            continue
+        name = deliver[len(prefix):]
+        cid = name_to_id.get(channel_slug(name))
+        if cid:
+            job["deliver"] = f"discord:{cid}"
+        else:
+            unresolved.append(name)
+    return unresolved
 
 
 def ensure_env(profile_dir: str | Path, updates: dict[str, str]) -> str:
@@ -534,7 +573,11 @@ def write_profile(spec: dict, profile_dir: str | Path) -> dict:
     soul_path = profile / "SOUL.md"
     cron_path = profile / "cronjobs.yaml"
     merge_config(config_path, spec)  # MERGE under `ace:` — preserves Hermes keys + external_dirs
-    cron_path.write_text(json.dumps(build_cronjobs(spec), indent=2), encoding="utf-8")
+    jobs = build_cronjobs(spec)
+    # After first connect the directory exists: keep the numeric delivery targets a re-run
+    # would otherwise regress to names (resolve_channels.py owns the first resolution).
+    resolve_cron_deliver(jobs, load_channel_directory(profile))
+    cron_path.write_text(json.dumps(jobs, indent=2), encoding="utf-8")
     soul = render_soul(spec)
     if soul_path.exists():
         # Keep the post-connect channel directory (name → <#id> map) across re-runs:

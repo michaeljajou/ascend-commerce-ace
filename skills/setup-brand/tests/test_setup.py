@@ -460,3 +460,53 @@ def test_cron_mode_is_never_deny(tmp_path):
     assert approvals["cron_mode"] == "approve"
     assert approvals["mode"] == "smart"          # still hardened
     assert approvals["timeout"] == 60            # unrelated keys preserved
+
+
+def test_resolve_cron_deliver_rewrites_channel_names_to_ids():
+    """Hermes resolves `discord:#name` against the live directory by exact name, so a
+    decorated channel ('📢│announcements') misses and delivery dies on int('#announcements').
+    The numeric id is the one form that always delivers."""
+    jobs = [
+        {"name": "weekly-reminders", "deliver": "discord:#announcements"},
+        {"name": "sweep-unanswered", "deliver": "discord"},          # home channel — untouched
+        {"name": "daily-digest", "deliver": None},                   # posts itself — untouched
+        {"name": "orphan", "deliver": "discord:#nowhere"},           # unknown — left for the warning
+    ]
+    unresolved = setup.resolve_cron_deliver(jobs, {"announcements": "555", "campaigns": "556"})
+    assert jobs[0]["deliver"] == "discord:555"
+    assert jobs[1]["deliver"] == "discord"
+    assert jobs[2]["deliver"] is None
+    assert jobs[3]["deliver"] == "discord:#nowhere"
+    assert unresolved == ["nowhere"]
+
+
+def test_resolve_cron_deliver_is_idempotent_on_ids():
+    jobs = [{"name": "weekly-reminders", "deliver": "discord:555"}]
+    assert setup.resolve_cron_deliver(jobs, {"announcements": "555"}) == []
+    assert jobs[0]["deliver"] == "discord:555"
+
+
+def test_load_channel_directory_keys_by_slug(tmp_path):
+    (tmp_path / "channel_directory.json").write_text(json.dumps({"platforms": {"discord": [
+        {"id": "555", "name": "📢│announcements", "type": "channel"},
+        {"id": "556", "name": "Brand / #campaigns", "type": "channel"},
+        {"id": "999", "name": "Brand / #x", "type": "group"},
+    ]}}), encoding="utf-8")
+    assert setup.load_channel_directory(tmp_path) == {"announcements": "555", "campaigns": "556"}
+    assert setup.load_channel_directory(tmp_path / "missing") == {}
+
+
+def test_write_profile_resolves_cron_deliver_when_directory_exists(tmp_path):
+    """A setup-brand re-run after first connect must not regress the target to a name."""
+    (tmp_path / "channel_directory.json").write_text(json.dumps({"platforms": {"discord": [
+        {"id": "555", "name": "📢│announcements", "type": "channel"},
+    ]}}), encoding="utf-8")
+    written = setup.write_profile(make_spec(), tmp_path)
+    jobs = {j["name"]: j for j in json.loads(Path(written["cronjobs"]).read_text())}
+    assert jobs["weekly-reminders"]["deliver"] == "discord:555"
+
+
+def test_write_profile_keeps_name_before_first_connect(tmp_path):
+    written = setup.write_profile(make_spec(), tmp_path)
+    jobs = {j["name"]: j for j in json.loads(Path(written["cronjobs"]).read_text())}
+    assert jobs["weekly-reminders"]["deliver"] == "discord:#announcements"   # resolved at Step 5

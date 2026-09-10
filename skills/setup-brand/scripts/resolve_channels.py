@@ -40,6 +40,8 @@ from setup import (  # noqa: E402
     CHANNEL_DIR_END,
     CHANNEL_DIR_START,
     ensure_env,
+    load_channel_directory,
+    resolve_cron_deliver,
     upsert_channel_directory,
 )
 
@@ -57,8 +59,10 @@ CREATE_PRIVATE_THREADS = 1 << 36
 SEND_MESSAGES_IN_THREADS = 1 << 38
 
 
-def _discord(token: str, path: str, payload: dict | None = None):
-    """Tiny Discord REST helper (monkeypatched in tests)."""
+def _discord(token: str, path: str, payload: dict | None = None, method: str | None = None):
+    """Tiny Discord REST helper (monkeypatched in tests). GET without a payload, POST with
+    one, or an explicit ``method`` (PUT for per-overwrite permission writes, which return
+    204 No Content → None)."""
     import urllib.request
 
     req = urllib.request.Request(
@@ -66,10 +70,11 @@ def _discord(token: str, path: str, payload: dict | None = None):
         data=json.dumps(payload).encode("utf-8") if payload is not None else None,
         headers={"Authorization": f"Bot {token}", "Content-Type": "application/json",
                  "User-Agent": UA},
-        method="POST" if payload is not None else "GET",
+        method=method or ("POST" if payload is not None else "GET"),
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        body = resp.read().decode("utf-8")
+        return json.loads(body) if body.strip() else None
 
 
 def bot_token(profile: Path) -> str | None:
@@ -96,12 +101,15 @@ def ensure_onboarding_channel(profile: Path, ace_cfg: dict, name_to_id: dict[str
     """
     ob = ace_cfg.get("onboarding") or {}
     name = str(ob.get("channel_name") or ONBOARDING_CHANNEL_NAME)
-    if existing := name_to_id.get(channel_slug(name)):
-        return existing
+    existing = name_to_id.get(channel_slug(name))
 
     token = bot_token(profile)
     guild_id = str((ace_cfg.get("discord") or {}).get("guild_id") or "")
     if not token or not guild_id:
+        if existing:
+            print("WARNING: adopted the existing onboarding channel but can't set its "
+                  "permissions (missing token/guild).", file=sys.stderr)
+            return existing
         print("WARNING: can't create the onboarding channel (missing token/guild).", file=sys.stderr)
         return None
 
@@ -134,6 +142,20 @@ def ensure_onboarding_channel(profile: Path, ace_cfg: dict, name_to_id: dict[str
     else:
         print(f"WARNING: staff role {staff_name!r} not found — staff thread access not granted.",
               file=sys.stderr)
+
+    if existing:
+        # Adopted — typically the old greeter's #onboarding (QBounce, 2026-09-10: Vaulty's
+        # channel had no @everyone View allow and no bot entry, so a fresh joiner would
+        # never have seen their thread). Apply the door design one overwrite at a time:
+        # PUT touches only our three entries and leaves foreign ones (Vaulty's own role)
+        # exactly as they are — and unlike a full-replace PATCH it never 403s on bits the
+        # bot doesn't hold in someone else's overwrite.
+        for o in overwrites:
+            _discord(token, f"/channels/{existing}/permissions/{o['id']}",
+                     {"type": o["type"], "allow": o.get("allow", "0"), "deny": o.get("deny", "0")},
+                     method="PUT")
+        print(f"adopted existing #{name} ({existing}); door permissions applied", file=sys.stderr)
+        return existing
 
     created = _discord(token, f"/guilds/{guild_id}/channels", {
         "name": name, "type": 0,
@@ -179,13 +201,10 @@ def main(argv: list[str] | None = None) -> int:
     scoping = ace_discord.get("scoping") or {}
     free_response_names = set(scoping.get("free_response", []))
 
-    directory = json.loads(directory_path.read_text(encoding="utf-8"))
-    discord_channels = directory.get("platforms", {}).get("discord", [])
     # Keys are SLUGS: directory names arrive decorated ('📢│announcements') or
     # guild-qualified ('Brand / #community-chat'), while the spec/config carry the
     # plain names operators type. channel_slug makes all three shapes one key.
-    name_to_id = {channel_slug(c["name"]): c["id"]
-                  for c in discord_channels if c.get("type") == "channel"}
+    name_to_id = load_channel_directory(profile)
     if not name_to_id:
         print("No channels in the directory — is the bot actually in the server yet?", file=sys.stderr)
         return 1
@@ -246,6 +265,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"WARNING: {soul_path} not found — run setup.py first; skipping channel directory.",
               file=sys.stderr)
 
+    # 4. cron delivery targets → numeric ids. setup.py can only write `discord:#<name>`
+    # before first connect; Hermes resolves that by EXACT directory name, so a decorated
+    # channel misses and delivery dies on int('#name'). Only the id always delivers.
+    cron_path = profile / "cronjobs.yaml"
+    cron_deliver: dict[str, str] = {}
+    if cron_path.exists():
+        jobs = yaml.safe_load(cron_path.read_text(encoding="utf-8")) or []
+        unresolved = resolve_cron_deliver(jobs, name_to_id)
+        if unresolved:
+            print(f"WARNING: cron delivery channel(s) not in the server: {unresolved} — "
+                  "left as names; create them (or fix the spec) and re-run.", file=sys.stderr)
+        cron_path.write_text(json.dumps(jobs, indent=2), encoding="utf-8")
+        cron_deliver = {j["name"]: j["deliver"] for j in jobs
+                        if isinstance(j.get("deliver"), str) and j["deliver"].startswith("discord:")
+                        and j["deliver"][len("discord:"):].isdigit()}
+
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     print(json.dumps({
         "gateway": "mention-only (free_response_channels cleared; sweep cron covers the rest)",
@@ -254,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         "home_channel": {"name": home_name, "id": home_id},
         "onboarding_channel": onboarding_channel,
         "soul_channel_directory": soul_updated,
+        "cron_deliver": cron_deliver,
         "next": "restart the gateway to pick up the gateway config and home channel",
     }, indent=2))
     return 0

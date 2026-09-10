@@ -156,3 +156,89 @@ def test_onboarding_existing_channel_id_not_recreated(tmp_path, monkeypatch):
     resolve_channels.main(["--profile-dir", str(tmp_path)])
     cfg = yaml.safe_load(cfg_path.read_text())
     assert cfg["discord"]["free_response_channels"] == "900"      # reused, not recreated
+
+
+def test_resolves_cron_delivery_targets(tmp_path, capsys):
+    """weekly-reminders is written by setup.py as `discord:#<name>`; after first connect the
+    directory knows the id, and only the id delivers on servers with decorated channel names."""
+    make_profile(tmp_path, directory_channels=[
+        {"id": "101", "name": "📢│campaigns", "type": "channel"},
+        {"id": "102", "name": "community-chat", "type": "channel"},
+        {"id": "103", "name": "agent-ace", "type": "channel"},
+    ])
+    (tmp_path / "cronjobs.yaml").write_text(json.dumps([
+        {"name": "weekly-reminders", "schedule": "0 16 * * 1,4", "skill": "weekly-reminders",
+         "deliver": "discord:#campaigns"},
+        {"name": "sweep-unanswered", "schedule": "every 2m", "skill": "sweep-unanswered",
+         "script": "ace-sweep.py", "deliver": "discord"},
+        {"name": "stray", "schedule": "0 9 * * *", "skill": "x", "deliver": "discord:#nowhere"},
+    ]), encoding="utf-8")
+
+    assert resolve_channels.main(["--profile-dir", str(tmp_path)]) == 0
+
+    jobs = {j["name"]: j for j in json.loads((tmp_path / "cronjobs.yaml").read_text())}
+    assert jobs["weekly-reminders"]["deliver"] == "discord:101"
+    assert jobs["sweep-unanswered"]["deliver"] == "discord"
+    assert jobs["stray"]["deliver"] == "discord:#nowhere"
+    captured = capsys.readouterr()
+    assert "nowhere" in captured.err                                # unresolved target warned
+    summary = json.loads(captured.out)
+    assert summary["cron_deliver"] == {"weekly-reminders": "discord:101"}
+
+
+def test_no_cronjobs_file_is_fine(tmp_path):
+    make_profile(tmp_path)
+    assert resolve_channels.main(["--profile-dir", str(tmp_path)]) == 0
+
+
+def test_onboarding_existing_channel_by_name_is_adopted_with_door_permissions(tmp_path, monkeypatch):
+    """QBounce (2026-09-10) already had Vaulty's #onboarding: @everyone with no View allow, no
+    bot entry. Adopting it by name must apply the door design — per overwrite (PUT), so
+    foreign entries such as Vaulty's own role are never touched — instead of creating a twin."""
+    make_profile(tmp_path, directory_channels=[
+        {"id": "101", "name": "campaigns", "type": "channel"},
+        {"id": "102", "name": "community-chat", "type": "channel"},
+        {"id": "103", "name": "agent-ace", "type": "channel"},
+        {"id": "777", "name": "onboarding", "type": "channel"},
+    ])
+    cfg_path = tmp_path / "config.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["ace"]["onboarding"] = {"enabled": True, "staff_role": "Ascend Team"}
+    cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    calls = []
+
+    def fake_discord(token, path, payload=None, method=None):
+        calls.append((method or ("POST" if payload is not None else "GET"), path, payload))
+        if path == "/guilds/g1/roles":
+            return [{"id": "r1", "name": "Ascend Team"}, {"id": "r9", "name": "Onboarding"}]
+        if path == "/users/@me":
+            return {"id": "botid"}
+        if path.startswith("/channels/777/permissions/"):
+            return None                                             # 204 No Content
+        raise AssertionError(path)
+
+    monkeypatch.setattr(resolve_channels, "_discord", fake_discord)
+    assert resolve_channels.main(["--profile-dir", str(tmp_path)]) == 0
+
+    cfg = yaml.safe_load(cfg_path.read_text())
+    assert cfg["ace"]["onboarding"]["channel_id"] == "777"          # adopted, not recreated
+    assert cfg["discord"]["free_response_channels"] == "777"
+    assert not any(m == "POST" and p == "/guilds/g1/channels" for m, p, _ in calls)
+
+    puts = {p.rsplit("/", 1)[1]: (m, body) for m, p, body in calls if p.startswith("/channels/777/permissions/")}
+    assert set(puts) == {"g1", "botid", "r1"}                       # ours only; r9 untouched
+    assert all(m == "PUT" for m, _ in puts.values())
+    everyone = puts["g1"][1]
+    assert everyone["type"] == 0
+    assert int(everyone["allow"]) & resolve_channels.VIEW_CHANNEL
+    assert int(everyone["allow"]) & resolve_channels.READ_MESSAGE_HISTORY
+    assert int(everyone["allow"]) & resolve_channels.SEND_MESSAGES_IN_THREADS
+    assert int(everyone["deny"]) & resolve_channels.SEND_MESSAGES
+    assert int(everyone["deny"]) & resolve_channels.CREATE_PRIVATE_THREADS
+    bot = puts["botid"][1]
+    assert bot["type"] == 1
+    assert int(bot["allow"]) & resolve_channels.CREATE_PRIVATE_THREADS
+    assert int(bot["allow"]) & resolve_channels.MANAGE_THREADS
+    staff = puts["r1"][1]
+    assert staff["type"] == 0 and int(staff["allow"]) & resolve_channels.MANAGE_THREADS

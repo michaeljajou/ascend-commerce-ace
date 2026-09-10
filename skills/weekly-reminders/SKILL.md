@@ -1,7 +1,7 @@
 ---
 name: weekly-reminders
 description: Announcement Type 1 — automated recurring reminders for creators to join active campaigns/challenges. No human input.
-version: 0.2.0
+version: 0.3.0
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -28,7 +28,10 @@ brand's POST_ANSWER/POST_ONLY channel.
    ```
 2. Fill a short reminder template (name, theme, how to participate, deadline, prizes) **using only**
    facts from the `active` posts.
-3. Post to the configured channel (Hermes cron delivery handles the target).
+3. Post to the configured channel (Hermes cron delivery handles the target). **Your whole
+   final response is delivered verbatim as the post.** Output ONLY the reminder text: no
+   date/data recap, no "here's the reminder", no `---` separators, no notes about closed
+   challenges. If nothing is active, respond with exactly `[SILENT]` and nothing else.
 
 ## Pitfalls
 - If `active` is null in both launch channels, **don't invent one** — skip the post (or post a
@@ -38,4 +41,8 @@ brand's POST_ANSWER/POST_ONLY channel.
 
 ## Verification
 - On schedule, a reminder posts to the configured channel with details matching the newest
-  campaign/challenge posts.
+  campaign/challenge posts, and nothing but the reminder appears there.
+- The cron job's delivery target is the numeric channel id (`discord:<id>`, written by
+  `resolve_channels.py`). A `discord:#name` target only delivers when the channel name is
+  undecorated — on servers with names like `📢│announcements` it 404s on every run while
+  `cron list` still says "ok" (I Am Joy, Aug–Sep 2026).
