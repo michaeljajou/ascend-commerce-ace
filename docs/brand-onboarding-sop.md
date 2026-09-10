@@ -458,6 +458,7 @@ shows the completed run; no FAILED cron rows in the scheduler.
 community QA don't need it). All five crons resumed, gateway up as uid 10000. The
 throwaway-account walk-through (fresh join → gate proof → onboarding → community QA)
 runs against the live system with real timers — sweep replies land ~10–12 min after
+an untagged question.
 🔄 2026-09-10 QBounce — PROD mode like I Am Joy. Go-live pass: `spec.json`
 `onboarding.enabled: true` → setup.py re-run (kept `channel_id`, free-response and
 binding from the paused wiring) → gateway up as uid 10000 (connected as Ace#8714 in ~4s;
@@ -466,7 +467,6 @@ running" — poll, don't trust the first read) → five crons resumed → join l
 re-attached within a minute; first sweep and onboarding ticks ran quiet (`wakeAgent=false`,
 zero API calls). Went live 14:32 ET with the OpenRouter balance at $8.56 and no top-up in
 sight — operator's call. Throwaway walk-through pending.
-an untagged question.
 
 **Catches from the first month live (read from the profile's `state.db` sweep sessions and
 the channels themselves, 2026-09-04):** (1) the brand posts every campaign and announcement
