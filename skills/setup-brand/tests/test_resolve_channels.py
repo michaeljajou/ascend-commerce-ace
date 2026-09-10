@@ -242,3 +242,33 @@ def test_onboarding_existing_channel_by_name_is_adopted_with_door_permissions(tm
     assert int(bot["allow"]) & resolve_channels.MANAGE_THREADS
     staff = puts["r1"][1]
     assert staff["type"] == 0 and int(staff["allow"]) & resolve_channels.MANAGE_THREADS
+
+
+def test_wire_onboarding_flag_wires_a_paused_brand(tmp_path, monkeypatch):
+    """`ace.onboarding.enabled` is a LIVE switch: the fleet join listener connects as the
+    brand's bot the moment it is true (QBounce showed online mid-onboarding, 2026-09-10).
+    A brand therefore sits paused with enabled=false until go-live — and the resolver
+    must still be able to create/adopt the onboarding channel and wire the gateway."""
+    make_profile(tmp_path)
+    cfg_path = tmp_path / "config.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["ace"]["onboarding"] = {"enabled": False, "staff_role": "Ascend Team"}
+    cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    def fake_discord(token, path, payload=None, method=None):
+        if path == "/guilds/g1/roles":
+            return [{"id": "r1", "name": "Ascend Team"}]
+        if path == "/users/@me":
+            return {"id": "botid"}
+        if path == "/guilds/g1/channels":
+            return {"id": "901"}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(resolve_channels, "_discord", fake_discord)
+    assert resolve_channels.main(["--profile-dir", str(tmp_path), "--wire-onboarding"]) == 0
+
+    cfg = yaml.safe_load(cfg_path.read_text())
+    assert cfg["ace"]["onboarding"]["enabled"] is False              # still paused
+    assert cfg["ace"]["onboarding"]["channel_id"] == "901"
+    assert cfg["discord"]["free_response_channels"] == "901"
+    assert cfg["discord"]["channel_skill_bindings"] == [{"id": "901", "skills": ["run-onboarding"]}]

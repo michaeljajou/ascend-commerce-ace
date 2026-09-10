@@ -210,7 +210,11 @@ Vaulty off.
 1. Write the spec JSON: `brand_id`, `brand_name`, `discord.guild_id` (from Step 3),
    channel behavior map (mirror an existing brand's mapping as baseline: community-chat
    POST_ANSWER, our-products ANSWER, announcements POST_ONLY, etc.), `slack_channel`,
-   `model` (mirror the pilot-proven config), `ace.onboarding.enabled: true`.
+   `model` (mirror the pilot-proven config), and **`onboarding.enabled: false`** — it flips
+   to true at go-live (Step 9). `ace.onboarding.enabled` is a LIVE switch: the fleet join
+   listener rescans every profile every 60s and connects as the brand's bot the moment it
+   is true, so the bot shows online and joins start onboarding threads while the gateway
+   is still down (QBounce, 2026-09-10).
 2. Store the spec at `<profile>/spec.json` (documents the brand; makes re-runs one
    command), then run `python skills/setup-brand/scripts/setup.py --spec
    <profile>/spec.json --profile-dir <profile>` (via the Hermes venv in the container).
@@ -254,8 +258,10 @@ via OpenRouter, `fallback_providers: []`); hardening verified; foreign
 **Do:** channel IDs don't exist until the bot connects once.
 1. `hermes --profile <brand> gateway run` → wait for "Channel directory built: N target(s)"
    with N > 0 → stop it.
-2. `python skills/setup-brand/scripts/resolve_channels.py --profile-dir <profile_dir>` —
-   wires the mention-only gateway (`require_mention: true`), `DISCORD_HOME_CHANNEL`
+2. `python skills/setup-brand/scripts/resolve_channels.py --profile-dir <profile_dir>
+   --wire-onboarding` — the flag wires the onboarding channel while the brand is still
+   paused (`onboarding.enabled: false`, see Step 4). Wires the mention-only gateway
+   (`require_mention: true`), `DISCORD_HOME_CHANNEL`
    (#agent-ace), the SOUL.md channel directory, and the onboarding channel (creates
    #onboarding, binds it as the sole free-response channel, binds `run-onboarding`).
    A server that already has an `onboarding` channel (Vaulty's) gets it ADOPTED by name,
@@ -398,6 +404,9 @@ channels verified view=Y send=Y history=Y by computation AND live reads OK.
 **Who:** Runner drives; Operator (or a throwaway account) plays creator.
 
 **Do:**
+0. Go live: set `onboarding.enabled: true` in `<profile>/spec.json`, re-run `setup.py`
+   (keeps the Step 5 wiring and `channel_id`), start the gateway, resume the crons. The
+   join listener picks the brand up within 60s.
 1. Test-mode ON (short join-poll/reminder windows) for the QA pass.
 2. Fresh account joins → sees only #onboarding → private thread opens → complete the
    conversation → `onboarded`+`creator` assigned → channels appear → captured details
@@ -470,10 +479,18 @@ gateway runs. A brand is "live" only while two things run, and each pauses indep
   scripts talk to Discord via REST): `hermes --profile <brand> cron pause <job>` /
   `cron resume <job>`; `cron list` to see them.
 
+- **Fleet join listener** (one process for all brands, `ace-join-listener.py`): it
+  rescans every profile every 60s and holds a Discord connection for every brand whose
+  `ace.onboarding.enabled` is true — the bot shows ONLINE and a join opens an onboarding
+  thread even with the gateway down. Pausing a brand for the listener means setting
+  `onboarding.enabled: false` in the spec and re-running `setup.py`; it drops the
+  connection on the next rescan ("dropped a connection (brand disabled)" in
+  `/opt/data/logs/ace-join-listener.log`).
+
 During onboarding (this SOP), a new brand is fully paused by default: no gateway, no
-crons until Steps 5/7 — and the Step 5 first connect is deliberately brief
-(build directory → stop). Leave the gateway down through Steps 6–8 and bring it up for
-the Step 9 smoke test.
+crons until Steps 5/7, `onboarding.enabled: false` until Step 9 — and the Step 5 first
+connect is deliberately brief (build directory → stop). Leave the gateway down through
+Steps 6–8 and bring it up for the Step 9 smoke test.
 
 ---
 

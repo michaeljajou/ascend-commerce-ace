@@ -7,6 +7,8 @@ only knowable after the brand's gateway has connected to Discord at least once
 and built the profile's channel_directory.json.
 
 What it wires (all idempotent):
+  0. Pass --wire-onboarding while the brand is still paused (ace.onboarding.enabled:
+     false): `enabled` is what the fleet join listener and the tick treat as "live".
   1. Mention-only gateway: `discord.require_mention: true` and
      `discord.free_response_channels` CLEARED. Ace answers @mentions and DMs
      instantly and hears nothing else live — team announcements can never get
@@ -180,6 +182,11 @@ def build_directory_block(name_to_id: dict[str, str]) -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--profile-dir", required=True)
+    ap.add_argument("--wire-onboarding", action="store_true",
+                    help="create/adopt the onboarding channel and wire the gateway even while "
+                         "ace.onboarding.enabled is false. `enabled` is a LIVE switch — the fleet "
+                         "join listener connects as the brand's bot the moment it is true — so a "
+                         "brand stays paused (enabled: false) until go-live and is wired with this flag.")
     args = ap.parse_args(argv)
 
     profile = Path(args.profile_dir)
@@ -225,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
 
     onboarding_channel = None
     ace_cfg = config.get("ace") or {}
-    if (ace_cfg.get("onboarding") or {}).get("enabled"):
+    if (ace_cfg.get("onboarding") or {}).get("enabled") or args.wire_onboarding:
         onboarding_channel = ((ace_cfg.get("onboarding") or {}).get("channel_id")
                               or ensure_onboarding_channel(profile, ace_cfg, name_to_id))
         if onboarding_channel:

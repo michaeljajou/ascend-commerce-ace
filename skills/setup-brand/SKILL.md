@@ -126,8 +126,11 @@ there is no ingest/embedding step.
    encodes the workaround as doctrine.
 3b. **First connect, then resolve channels.** Discord channel IDs don't exist until the bot connects once. Run `hermes --profile <brand_id> gateway run`, confirm "Channel directory built: N target(s)" with N > 0 in the logs, stop it, then run:
     ```
-    python /opt/data/ascend-commerce-ace/skills/setup-brand/scripts/resolve_channels.py --profile-dir <profile_dir>
+    python /opt/data/ascend-commerce-ace/skills/setup-brand/scripts/resolve_channels.py --profile-dir <profile_dir> --wire-onboarding
     ```
+    (`--wire-onboarding` wires the onboarding channel while the brand is still paused —
+    `ace.onboarding.enabled: false`. That flag is a LIVE switch: the fleet join listener
+    connects as the brand's bot the moment it is true, so keep it false until go-live.)
     This wires five things (idempotent, safe to re-run):
     - **Mention-only gateway**: `discord.require_mention: true` with `discord.free_response_channels` cleared. Ace answers @mentions and DMs instantly and hears nothing else live — so team announcements can never draw an accidental reply. Creator messages the team doesn't answer within the grace window are handled by the `sweep-unanswered` cron instead (see step 3).
     - `DISCORD_HOME_CHANNEL` / `DISCORD_HOME_CHANNEL_NAME` in the profile `.env` — Ace's proactive-output channel, resolved from `discord.home_channel` in the spec (**default: `agent-ace`** — every brand server should have an `#agent-ace` ops channel; the script warns if it's missing).
