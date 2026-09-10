@@ -285,6 +285,15 @@ touching permissions the bot doesn't hold — **Create Public Threads** was miss
 the original invite set; added to prep_server PERMS (audit + URL), operator re-clicked,
 resolve succeeded: #onboarding `1534273465333321831`, five swept channels resolved via
 slugs, home `#agent-ace` wired, SOUL directory written. Gateway left DOWN by design.
+✅ 2026-09-10 QBounce — first connect built the directory in ~12s (31 channels), stopped.
+Resolver run with `--wire-onboarding` on the PAUSED brand: adopted Vaulty's existing
+`onboarding` channel (`1544367029614547007`) and applied the door overwrites per PUT
+(no 403s — the pre-existing entries only touched View/Send), five swept channels
+resolved via slugs, home `#agent-ace` wired, SOUL directory written, `weekly-reminders`
+target rewritten to `discord:1544367029614547011`. Catch of the day: after Step 4 the
+fleet join listener had connected as the QBounce bot within a minute (spec said
+`enabled: true`) — bot showed online mid-onboarding; spec flipped to false, setup.py
+re-run, listener dropped it on the next rescan. Gateway left DOWN.
 
 ---
 
@@ -307,6 +316,9 @@ prints the raw file (the no-PyYAML fallback can't subset, so never test emptines
 **Live run:** ✅ 2026-08-04 I Am Joy — staged file copied in, hermes-owned; venv:
 commission query returned the FAQ slice, "wifi password" returned empty; sandbox as
 uid 10000: raw fallback served the file.
+✅ 2026-09-10 QBounce — copied in as uid 10000 (md5-identical to the staged file);
+venv: "commission rate" returned the FAQ slice, "wifi password" empty; sandbox as uid
+10000: raw fallback served the file.
 
 ---
 
@@ -341,6 +353,9 @@ at go-live, force one sweep tick and confirm a quiet tick spends zero tokens.
 **Live run:** ✅ 2026-08-04 I Am Joy — five jobs registered as uid 10000 +
 HOME=/opt/data, paused within the same minute (sweep's first fire was 2 minutes out),
 `cron list --all` confirms all five paused. Resume happens at Step 9.
+✅ 2026-09-10 QBounce — five jobs created as uid 10000 in one pass and paused within the
+same minute; none had run. `weekly-reminders` registered straight to the numeric id from
+the resolved `cronjobs.yaml`.
 
 ---
 
@@ -396,6 +411,19 @@ all five; operator adds Ace's role per-CHANNEL (View + Read History + Send) on t
 engaged/post channels. Never "Sync to category" — it would erase Vaulty's per-channel
 role allows. CLOSED after the operator's per-channel grants: all six engaged/post
 channels verified view=Y send=Y history=Y by computation AND live reads OK.
+✅ 2026-09-10 QBounce — operator chose no grandfathering (base role already View-off).
+Dry run blocked by the fenced-category guard on `🏠 Home` and `👥 Community` (same as I Am
+Joy) → operator granted the bot's role View on both categories → apply: base role grants
+`Onboarded`; `#new-members`, `#welcome`, the `#onboarding` door and `#agent-ace` gated;
+the two category belt writes failed 50013 (expected — they already deny @everyone).
+Leaks accepted by the operator: `create-ticket` (and `coaching-calls`) stay visible.
+COMPUTED visibility: role-less member sees exactly [#onboarding, #create-ticket];
+Onboarded 16 channels; Creator 8 (Vaulty tiering — completion assigns both roles, so the
+union applies). Same unsynced-children strike as I Am Joy: all six engaged/post channels
+carry their own `@everyone deny View` with no bot entry, so the category grant did not
+reach them — bot view=n on all six, and Send missing on announcements/challenges/
+our-products. Operator adds `Ace – Qbounce` per channel (View + Send + Read History);
+the gate is otherwise CLOSED.
 
 ---
 
