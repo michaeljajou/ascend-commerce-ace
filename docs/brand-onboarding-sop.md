@@ -54,6 +54,10 @@ item, tab + curly-quoted value props); fixed into `name`/`description` pairs, va
 both ends (md5-identical), staged at `/opt/data/staging/qbounce-knowledge.yaml`. Left for
 the brand team: `compliance` is empty, and the payment FAQ covers campaign rewards but not
 the commission payout schedule.
+✅ 2026-09-10 Prime Natural — the three usual faults plus a fourth: the second `compliance`
+item dedented to column 0. Fixed, validated both ends, staged. Content catch: commission
+`15%` in the section vs `20%` in the FAQ answer — operator confirmed 15%, FAQ corrected
+before Step 6. Same payment-FAQ gap as QBounce.
 
 ---
 
@@ -132,6 +136,9 @@ no chown is needed later; `--clone-from` copies only config.yaml/.env/SOUL.md/sk
 state.db, cron store, or data). Scrubbed the cloned token/home channel, repointed
 `ACE_DATA_DIR`, and also blanked the cloned `discord.free_response_channels` (test-brand's
 onboarding channel id) ahead of first connect. Operator token drop pending.
+✅ 2026-09-10 Prime Natural — same as QBounce (uid 10000 clone, scrub, repoint, blank the
+cloned free-response id); `spec.json` written with `onboarding.enabled: false` from the
+start. Token drop verified: one line, five keys.
 
 ---
 
@@ -199,6 +206,13 @@ nickname `Ace` set, avatar already present; re-run is a no-op. Also found a pre-
 no bot entry) — the resolver now adopts it and applies the door permissions (Step 5).
 Residue open: drag the bot's role above the three roles, assign Ascend Team (0 holders),
 Vaulty off.
+✅ 2026-09-10 Prime Natural (scripted half) — the biggest server yet: 302 humans, 202 text
+channels, 13 categories, and Vaulty genuinely ACTIVE here (bots: Carl-bot, Ticket Tool,
+Growi, Vaulty, client-reporting-agent, Euka Creators 2). `Ascend Team` already held by 8;
+Onboarded 186 / Creator 176 / role-less 3; base role View already off. No existing
+`onboarding` channel. Applied: `#agent-ace` created, nickname set, avatar present, intents
+and permissions complete. Residue open: bot role `Ace` at position 1 (drag above
+`Ascend Team` at 15), Vaulty join handling OFF (real this time).
 
 ---
 
@@ -248,6 +262,9 @@ MONITOR_ONLY, everything else INACTIVE; per-creator channels left unlisted. setu
 as uid 10000 (no chown needed); model inherited from the clone (`deepseek/deepseek-v4-flash`
 via OpenRouter, `fallback_providers: []`); hardening verified; foreign
 `onboarding.channel_id` dropped as designed.
+✅ 2026-09-10 Prime Natural — identical spec shape (six active channels, MONITOR pair,
+INACTIVE list, per-creator channels unlisted), `onboarding.enabled: false`; setup.py as
+uid 10000, hardening verified, model inherited.
 
 ---
 
@@ -294,6 +311,11 @@ target rewritten to `discord:1544367029614547011`. Catch of the day: after Step 
 fleet join listener had connected as the QBounce bot within a minute (spec said
 `enabled: true`) — bot showed online mid-onboarding; spec flipped to false, setup.py
 re-run, listener dropped it on the next rescan. Gateway left DOWN.
+✅ 2026-09-10 Prime Natural — first connect built 203 targets in ~12s; resolver with
+`--wire-onboarding` CREATED `#onboarding` (`1547691523070496800`) with the door design
+(no 403 — the Create Public Threads bit has been in PERMS since I Am Joy), five swept
+channels resolved, home `#agent-ace` `1547691197118685254`, SOUL directory 200 entries,
+reminders target `discord:1402018857715109991`. Gateway DOWN, brand paused.
 
 ---
 
@@ -319,6 +341,7 @@ uid 10000: raw fallback served the file.
 ✅ 2026-09-10 QBounce — copied in as uid 10000 (md5-identical to the staged file);
 venv: "commission rate" returned the FAQ slice, "wifi password" empty; sandbox as uid
 10000: raw fallback served the file.
+✅ 2026-09-10 Prime Natural — same, after the 15% correction (md5 7e26c17a…).
 
 ---
 
@@ -356,6 +379,7 @@ HOME=/opt/data, paused within the same minute (sweep's first fire was 2 minutes 
 ✅ 2026-09-10 QBounce — five jobs created as uid 10000 in one pass and paused within the
 same minute; none had run. `weekly-reminders` registered straight to the numeric id from
 the resolved `cronjobs.yaml`.
+✅ 2026-09-10 Prime Natural — same (one scripted pass: create ×5 then pause ×5).
 
 ---
 
