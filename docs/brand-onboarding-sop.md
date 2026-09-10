@@ -453,6 +453,16 @@ the **Advanced permissions** expander (role on the left, three-state toggles on 
 right). CLOSED after the per-channel grants: all six view=Y history=Y by computation,
 live reads OK on all six; Send=Y everywhere except `our-products` (read-only channel —
 creators can't post there, so nothing to answer in place).
+✅ 2026-09-10 Prime Natural — guard blocked on FOUR fenced categories (`🏠 Home`,
+`👥 Community`, `🎓 Free Mentorship`, `🛠️ Support`); operator granted the bot's role on the
+categories AND per channel in one round (the QBounce lesson, given up front) → apply:
+base role grants `Onboarded`; `#new-members`, `💰 Paid Collabs Support`, `#agent-ace` and
+the `#onboarding` door gated; five belt writes 50013 on Vaulty-walled structures
+(`❤️│welcome` + the four categories) — expected, they already deny @everyone. COMPUTED:
+role-less sees [welcome, onboarding, challenges] (welcome = the welcome mat as on I Am
+Joy; `🏅│challenges` re-allows @everyone — operator's call), Onboarded/Creator 20 each,
+bot view+history+read OK on all engaged channels, Send everywhere except `challenges`
+(operator adds it — challenge posts go there). Bot role dragged to 18, above all three.
 
 ---
 
