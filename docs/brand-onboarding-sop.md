@@ -423,7 +423,12 @@ union applies). Same unsynced-children strike as I Am Joy: all six engaged/post 
 carry their own `@everyone deny View` with no bot entry, so the category grant did not
 reach them — bot view=n on all six, and Send missing on announcements/challenges/
 our-products. Operator adds `Ace – Qbounce` per channel (View + Send + Read History);
-the gate is otherwise CLOSED.
+the gate is otherwise CLOSED. UI note that cost a round trip: on a channel's Permissions
+page the simple "private channel" list grants ONLY View when a role is added; Send needs
+the **Advanced permissions** expander (role on the left, three-state toggles on the
+right). CLOSED after the per-channel grants: all six view=Y history=Y by computation,
+live reads OK on all six; Send=Y everywhere except `our-products` (read-only channel —
+creators can't post there, so nothing to answer in place).
 
 ---
 
