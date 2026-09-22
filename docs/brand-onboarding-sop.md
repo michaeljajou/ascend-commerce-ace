@@ -367,8 +367,9 @@ directory match, so a decorated channel 404s on every run while the job reports 
 **Hermes wraps every cron delivery** in `Cronjob Response: <job> (job_id: …)` above the
 text and `To stop or manage this job, send me a new message…` below it unless
 `cron.wrap_response: false` is in the profile's config.yaml. `setup.py` forces it from
-2026-09-22; brands set up earlier need the key added by hand (no gateway restart: the
-scheduler re-reads config.yaml on each delivery). Found 2026-09-21: QBounce and Prime
+2026-09-22; brands set up earlier carry Hermes' default `wrap_response: true` further
+down the `cron:` block and need it flipped by hand (no gateway restart: the scheduler
+re-reads config.yaml on each delivery). Flipped on all four profiles 2026-09-22. Found 2026-09-21: QBounce and Prime
 Natural creators had seen the wrapper on every reminder since 9/10, and the Monday run's
 `HTTP 402` failure summary landed in both `#announcements` — a failed job delivers its
 error to the same target as a success, so a job that posts publicly cannot fail privately.
