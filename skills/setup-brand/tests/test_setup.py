@@ -462,6 +462,22 @@ def test_cron_mode_is_never_deny(tmp_path):
     assert approvals["timeout"] == 60            # unrelated keys preserved
 
 
+def test_cron_deliveries_are_unwrapped(tmp_path):
+    """Hermes wraps every cron delivery in "Cronjob Response: … (job_id: …)" plus a
+    "To stop or manage this job…" footer by default. weekly-reminders delivers straight
+    into a creator-facing channel, so the baseline must switch the wrapper off (QBounce
+    and Prime Natural creators saw it on every reminder, found 2026-09-21)."""
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"cron": {"provider": "", "wrap_response": True}}),
+                   encoding="utf-8")
+    setup.merge_config(cfg, make_spec())
+    cron = yaml.safe_load(cfg.read_text())["cron"]
+    assert cron["wrap_response"] is False
+    assert cron["provider"] == ""                # unrelated keys preserved
+
+
 def test_resolve_cron_deliver_rewrites_channel_names_to_ids():
     """Hermes resolves `discord:#name` against the live directory by exact name, so a
     decorated channel ('📢│announcements') misses and delivery dies on int('#announcements').

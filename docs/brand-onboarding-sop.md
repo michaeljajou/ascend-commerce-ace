@@ -364,6 +364,15 @@ directory match, so a decorated channel 404s on every run while the job reports 
 (I Am Joy delivered nothing for a month; found 2026-09-10 via the ⚠ line in `cron list
 --all`). Fix a registered job in place: `cron edit <job_id> --deliver discord:<id>`.
 
+**Hermes wraps every cron delivery** in `Cronjob Response: <job> (job_id: …)` above the
+text and `To stop or manage this job, send me a new message…` below it unless
+`cron.wrap_response: false` is in the profile's config.yaml. `setup.py` forces it from
+2026-09-22; brands set up earlier need the key added by hand (no gateway restart: the
+scheduler re-reads config.yaml on each delivery). Found 2026-09-21: QBounce and Prime
+Natural creators had seen the wrapper on every reminder since 9/10, and the Monday run's
+`HTTP 402` failure summary landed in both `#announcements` — a failed job delivers its
+error to the same target as a success, so a job that posts publicly cannot fail privately.
+
 Gotchas (all bit): run cron commands as **`-u 10000 -e HOME=/opt/data`** — the cron
 store is HOME-relative, so jobs created as root live in a different store than the
 scheduler reads. **Immediately `cron pause` every job** for a brand not yet live
@@ -531,6 +540,10 @@ the scripts by absolute path. Deploy note: `ace-sweep.py` is a COPY in `<profile
 see Step 7); repointed to the id and **left paused** until the operator reviews the
 composed output — the Sept 7 run prefixed the post with a data recap, so the skill now
 carries an output-only contract. Resume with `cron resume 7a30c4a702b0`.
+(6) 2026-09-21: the OpenRouter balance ran down (≈$10 of $720 left) and the Monday
+`weekly-reminders` run 402'd on QBounce and Prime Natural; Hermes delivered the failure
+summary, wrapped in its cron boilerplate, into both brands' public `#announcements`
+(see the wrap_response note in Step 7). `cron.wrap_response: false` applied fleet-wide.
 
 ---
 

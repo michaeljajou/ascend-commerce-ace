@@ -46,3 +46,11 @@ brand's POST_ANSWER/POST_ONLY channel.
   `resolve_channels.py`). A `discord:#name` target only delivers when the channel name is
   undecorated — on servers with names like `📢│announcements` it 404s on every run while
   `cron list` still says "ok" (I Am Joy, Aug–Sep 2026).
+- The brand config has `cron.wrap_response: false` (forced by `setup-brand`). With Hermes'
+  default the post arrives as `Cronjob Response: weekly-reminders (job_id: …)` + the text +
+  `To stop or manage this job, send me a new message…`; QBounce and Prime Natural creators
+  saw that wrapper on every reminder 2026-09-10 → 09-21.
+- A failed run still delivers its error summary to this same channel — Hermes has one
+  target per job and always delivers failures. The 2026-09-21 run posted an `HTTP 402`
+  notice into both brands' `#announcements`. Keeping errors private means the job must
+  deliver to the home channel and a script must post the reminder instead.

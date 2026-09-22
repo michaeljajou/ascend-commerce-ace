@@ -435,6 +435,16 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path",
     existing.setdefault("skills", {})["creation_nudge_interval"] = 0
     existing.setdefault("memory", {})["nudge_interval"] = 0
 
+    # Cron deliveries land in creator-facing channels (weekly-reminders posts straight into
+    # #announcements) and Hermes wraps every delivery in operator boilerplate by default:
+    # "Cronjob Response: <job> (job_id: …)" above the text, "To stop or manage this job,
+    # send me a new message…" below it. QBounce and Prime Natural creators saw that on
+    # every reminder from 2026-09-10 until it was found on 2026-09-21. False delivers the
+    # agent's text verbatim. It only strips the wrapper: a FAILED run still delivers its
+    # error summary to the job's one target (the scheduler always delivers failures), so
+    # keeping errors out of a public channel means moving that job's --deliver off it.
+    existing["cron"] = {**(existing.get("cron") or {}), "wrap_response": False}
+
     # Latency ceiling. Hermes defaults to 150 sequential tool round trips per reply;
     # a creator-facing support bot needs ~2. Measured in QA: one onboarding reply
     # burned 17 round trips over 6 minutes (mostly the agent retrying skill edits).
