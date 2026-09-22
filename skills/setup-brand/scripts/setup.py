@@ -32,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
 sys.path.insert(0, str(Path(__file__).resolve().parent))      # → sibling prep_server.py
+from _lib.brand import POST_BEHAVIORS  # noqa: E402
 
 # Channel behaviors from the spec's channel map.
 BEHAVIORS = {
@@ -50,7 +51,7 @@ _FREE_RESPONSE = {"FULL_ACTIVE", "ANSWER", "POST_ANSWER", "PAID_COLLAB", "AMBASS
 # Behaviors where Ace must not converse (replies suppressed entirely).
 _IGNORED = {"INACTIVE", "POST_ONLY"}
 # Behaviors where cron posts content.
-_POST_TARGET = {"POST_ONLY", "POST_ANSWER"}
+_POST_TARGET = POST_BEHAVIORS          # shared with the scripts that post (_lib.brand)
 
 # model + slack_channel are OPTIONAL: no model → inherit Hermes' default; no slack → default channel.
 REQUIRED_KEYS = ("brand_id", "discord")
@@ -241,9 +242,18 @@ def build_cronjobs(spec: dict) -> list[dict]:
                    "skill (Nudge mode) exactly. End with only [SILENT]."},
     ]
     if post_target:
+        # Delivers to the HOME channel on purpose. Hermes has one delivery target per job and
+        # always delivers a failed run's error summary to it; while this job delivered straight
+        # into #announcements, the 2026-09-21 HTTP 402 landed in front of QBounce's and Prime
+        # Natural's creators. post.py puts the reminder in the POST_* channel (resolved from
+        # brand.json at run time) and the agent ends with [SILENT], so a good run delivers
+        # nothing and a failure is only ever seen by the team in #agent-ace.
         jobs.append(
             {"name": "weekly-reminders", "schedule": "0 16 * * 1,4", "skill": "weekly-reminders",
-             "deliver": f"discord:#{post_target}"}
+             "deliver": "discord",
+             "prompt": "Post the recurring campaign/challenge reminder following the "
+                       "weekly-reminders skill exactly: fetch.py for the active campaign, "
+                       "compose the reminder, hand it to post.py on stdin. End with only [SILENT]."}
         )
     return jobs
 
@@ -266,8 +276,9 @@ def resolve_cron_deliver(jobs: list[dict], name_to_id: dict[str, str]) -> list[s
     """Rewrite `discord:#<name>` cron delivery targets to `discord:<id>` in place.
 
     Hermes resolves a `discord:#name` target against the live directory by EXACT name, so a
-    decorated channel misses and delivery dies on int('#name') (I Am Joy, every run for a
-    month). The numeric id is the one form that always delivers. Returns the names the
+    decorated channel misses and delivery dies on int('#name') (I Am Joy's weekly-reminders,
+    every run for a month, until that job moved to the home channel on 2026-09-22). The
+    numeric id is the one form that always delivers. Returns the names the
     directory doesn't know — those are left untouched for the caller to warn about."""
     from prep_server import channel_slug
 

@@ -143,7 +143,18 @@ def test_build_cronjobs_targets_post_channel():
     assert set(jobs) >= {"daily-digest", "nudge-inactive", "weekly-reminders"}
     assert "ingest-knowledge" not in jobs  # no ingest step with YAML knowledge
     assert jobs["daily-digest"]["deliver"] is None   # digest posts via slack_cli.py itself
-    assert jobs["weekly-reminders"]["deliver"] == "discord:#announcements"
+    assert jobs["weekly-reminders"]["deliver"] == "discord"   # home channel, see below
+
+
+def test_weekly_reminders_delivers_to_the_home_channel_and_posts_by_script():
+    """Hermes has ONE delivery target per cron job and always delivers a failed run's error
+    summary to it. With the job delivering straight into #announcements, the 2026-09-21
+    HTTP 402 landed in front of QBounce's and Prime Natural's creators. So the job now
+    delivers to the home channel (bare `discord`) and post.py puts the reminder in the
+    announcement channel; the agent ends with [SILENT] so a good run delivers nothing."""
+    job = {j["name"]: j for j in setup.build_cronjobs(make_spec())}["weekly-reminders"]
+    assert job["deliver"] == "discord"
+    assert "post.py" in job["prompt"] and "[SILENT]" in job["prompt"]
 
 
 def test_write_profile_roundtrips_config(tmp_path):
@@ -512,17 +523,13 @@ def test_load_channel_directory_keys_by_slug(tmp_path):
     assert setup.load_channel_directory(tmp_path / "missing") == {}
 
 
-def test_write_profile_resolves_cron_deliver_when_directory_exists(tmp_path):
-    """A setup-brand re-run after first connect must not regress the target to a name."""
+def test_write_profile_leaves_home_channel_targets_alone(tmp_path):
+    """resolve_cron_deliver only rewrites `discord:#name`; a bare `discord` (home channel)
+    target must survive a re-run after first connect unchanged."""
     (tmp_path / "channel_directory.json").write_text(json.dumps({"platforms": {"discord": [
         {"id": "555", "name": "📢│announcements", "type": "channel"},
     ]}}), encoding="utf-8")
     written = setup.write_profile(make_spec(), tmp_path)
     jobs = {j["name"]: j for j in json.loads(Path(written["cronjobs"]).read_text())}
-    assert jobs["weekly-reminders"]["deliver"] == "discord:555"
-
-
-def test_write_profile_keeps_name_before_first_connect(tmp_path):
-    written = setup.write_profile(make_spec(), tmp_path)
-    jobs = {j["name"]: j for j in json.loads(Path(written["cronjobs"]).read_text())}
-    assert jobs["weekly-reminders"]["deliver"] == "discord:#announcements"   # resolved at Step 5
+    assert jobs["weekly-reminders"]["deliver"] == "discord"
+    assert jobs["sweep-unanswered"]["deliver"] == "discord"

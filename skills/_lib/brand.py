@@ -65,3 +65,16 @@ def write_sidecar(profile: Path, ace_config: dict) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(ace_config, indent=2, sort_keys=True), encoding="utf-8")
     return str(path)
+
+
+# Channels the brand posts announcements into (and, for POST_ANSWER, also answers in).
+POST_BEHAVIORS = frozenset({"POST_ONLY", "POST_ANSWER"})
+
+
+def post_channel(ace_config: dict) -> str | None:
+    """Where automated announcements go: the first POST_ONLY/POST_ANSWER channel by name
+    (the rule setup-brand's cron blueprint uses), or None when the brand has no such channel.
+    Scripts resolve the name to an id through channel_directory.json at run time."""
+    channels = (ace_config.get("discord") or {}).get("channels") or {}
+    posting = sorted(name for name, behavior in channels.items() if behavior in POST_BEHAVIORS)
+    return posting[0] if posting else None

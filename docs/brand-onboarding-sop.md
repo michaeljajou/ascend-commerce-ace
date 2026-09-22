@@ -290,8 +290,9 @@ uid 10000, hardening verified, model inherited.
 
 **Verify:** `channel_directory.json` exists with N > 0 channels; `config.yaml` has
 `require_mention: true` and `ace.onboarding.channel_id`; SOUL.md channel map lists the
-real `<#id>`s; `cronjobs.yaml` has `weekly-reminders` delivering to `discord:<numeric id>`
-(the script's `cron_deliver` summary line).
+real `<#id>`s; `cronjobs.yaml` has `weekly-reminders` with `deliver: discord` (the home
+channel — the script's `cron_deliver` summary lists only jobs that still target a named
+channel, none by default since 2026-09-22).
 
 **Live run:** ✅ 2026-08-04 I Am Joy — connected ~60s as uid 10000, directory built
 (178 channels, decorated names), stopped. Before first connect, scrubbed two more
@@ -358,11 +359,19 @@ hermes --profile <brand> cron create "every 2m" --name sweep-unanswered \
 ```
 Plus daily-digest and the other blueprint jobs (mirror the pilot brand's set:
 daily-digest, nudge-inactive, sweep-unanswered, onboarding-tick, weekly-reminders).
-**weekly-reminders takes its `--deliver` from the resolved `cronjobs.yaml`
-(`discord:<numeric id>`), never `discord:#name`** — Hermes resolves a name by exact
-directory match, so a decorated channel 404s on every run while the job reports "ok"
-(I Am Joy delivered nothing for a month; found 2026-09-10 via the ⚠ line in `cron list
---all`). Fix a registered job in place: `cron edit <job_id> --deliver discord:<id>`.
+**weekly-reminders registers with `--deliver discord` (the home channel) since
+2026-09-22** — its `post.py` puts the reminder in the brand's POST_* channel itself, so a
+failed run's error summary can only reach `#agent-ace`:
+```
+hermes --profile <brand> cron create "0 16 * * 1,4" --name weekly-reminders \
+  --skill weekly-reminders --deliver discord \
+  "Post the recurring campaign/challenge reminder following the weekly-reminders skill exactly: fetch.py for the active campaign, compose the reminder, hand it to post.py on stdin. End with only [SILENT]."
+```
+Any job that must deliver into a *named* channel takes `discord:<numeric id>` from the
+resolved `cronjobs.yaml`, never `discord:#name` — Hermes resolves a name by exact directory
+match, so a decorated channel 404s on every run while the job reports "ok" (I Am Joy's
+weekly-reminders delivered nothing for a month; found 2026-09-10 via the ⚠ line in
+`cron list --all`). Fix a registered job in place: `cron edit <job_id> --deliver <target>`.
 
 **Hermes wraps every cron delivery** in `Cronjob Response: <job> (job_id: …)` above the
 text and `To stop or manage this job, send me a new message…` below it unless
@@ -373,6 +382,9 @@ re-reads config.yaml on each delivery). Flipped on all four profiles 2026-09-22.
 Natural creators had seen the wrapper on every reminder since 9/10, and the Monday run's
 `HTTP 402` failure summary landed in both `#announcements` — a failed job delivers its
 error to the same target as a success, so a job that posts publicly cannot fail privately.
+Hence the same-day change above: weekly-reminders delivers to the home channel and posts
+through `post.py`. Repoint a live brand with `cron edit <job_id> --deliver discord --prompt
+"<the blueprint prompt>"`.
 
 Gotchas (all bit): run cron commands as **`-u 10000 -e HOME=/opt/data`** — the cron
 store is HOME-relative, so jobs created as root live in a different store than the
@@ -544,7 +556,9 @@ carries an output-only contract. Resume with `cron resume 7a30c4a702b0`.
 (6) 2026-09-21: the OpenRouter balance ran down (≈$10 of $720 left) and the Monday
 `weekly-reminders` run 402'd on QBounce and Prime Natural; Hermes delivered the failure
 summary, wrapped in its cron boilerplate, into both brands' public `#announcements`
-(see the wrap_response note in Step 7). `cron.wrap_response: false` applied fleet-wide.
+(see the wrap_response note in Step 7). `cron.wrap_response: false` applied fleet-wide, and
+the job redesigned the next day: `--deliver discord` + `post.py` (Step 7), so the only
+thing that can ever reach `#announcements` is the reminder itself.
 
 ---
 
