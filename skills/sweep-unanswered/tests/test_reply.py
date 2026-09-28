@@ -191,6 +191,65 @@ def test_onboarding_reply_refuses_a_completed_creator_thread(tmp_path, monkeypat
     assert "active creator onboarding thread" in capsys.readouterr().err
 
 
+def seed_remembered_thread(tmp_path, state, guided_at=None):
+    """A creator Ace already knows, in thread 888: fields and role stored, lifecycle set
+    by the caller. A rejoin leaves exactly this with no guided_at."""
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": {"general_qa": False, "engagement": True},
+        "onboarding": {"enabled": True, "channel_id": "777"},
+    }), encoding="utf-8")
+    (tmp_path / ".env").write_text("DISCORD_BOT_TOKEN=tok\n", encoding="utf-8")
+    conn = store.connect(ace_dir / "ace.db")
+    store.upsert_creator(conn, Creator(
+        handle="@back", tiktok="back.tt", role="Creator", onboarding_state=state
+    ))
+    store.update_onboarding(conn, "@back", thread_id="888", guided_at=guided_at)
+    conn.close()
+
+
+def test_onboarding_reply_allows_a_rejoined_creator_thread(tmp_path, monkeypatch):
+    """**The bug this test exists for.** Found in review of the ENG-299 rejoin fix (28 Sep
+    2026): this guard read a stored tiktok and role as completion. onboarding_tick keeps
+    both when a creator rejoins and restarts the row at collecting, so an onboarding reply
+    to a returning creator's new thread was refused as not an active onboarding thread."""
+    seed_remembered_thread(tmp_path, "collecting")
+    sent = {}
+    monkeypatch.setattr(reply, "post_reply",
+                        lambda token, cid, text, rt: sent.update(channel=cid) or {"id": "9"})
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "onboarding",
+                       "--channel-id", "888", "--text", "Welcome back"]) == 0
+    assert sent["channel"] == "888"
+
+
+def test_engagement_reply_refuses_a_rejoiner_nudged_before_finishing(
+        tmp_path, monkeypatch, capsys):
+    """**The bug this test exists for.** Same review: a returning creator who never replied
+    is moved to nudged by the tick with the remembered tiktok and role and no guided_at.
+    The guard read that as a guided creator and would have sent engagement outreach to
+    someone still locked out of the server."""
+    seed_remembered_thread(tmp_path, "nudged")
+    monkeypatch.setattr(reply, "bot_token",
+                        lambda _profile: (_ for _ in ()).throw(AssertionError("token read")))
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "engagement",
+                       "--channel-id", "888", "--text", "Come back"]) == 1
+    assert "guided creator thread" in capsys.readouterr().err
+
+
+def test_engagement_reply_allows_a_guided_creator_thread(tmp_path, monkeypatch):
+    seed_remembered_thread(tmp_path, "nudged", guided_at="210.0")
+    sent = {}
+    monkeypatch.setattr(reply, "post_reply",
+                        lambda token, cid, text, rt: sent.update(channel=cid) or {"id": "9"})
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "engagement",
+                       "--channel-id", "888", "--text", "Come back"]) == 0
+    assert sent["channel"] == "888"
+
+
 def test_disabled_engagement_refuses_recorded_thread_nudge_before_token_read(
         tmp_path, monkeypatch, capsys):
     ace_dir = tmp_path / "ace"

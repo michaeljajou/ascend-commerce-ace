@@ -52,7 +52,8 @@ def test_engagement_dm_allows_a_guided_completed_creator(tmp_path, monkeypatch):
     store.upsert_creator(conn, Creator(
         handle="@guided", tiktok="guided.tt", role="creator", onboarding_state="guided"
     ))
-    store.update_onboarding(conn, "@guided", discord_id="123")
+    # guided() always stamps guided_at; a guided row without it is not a real shape.
+    store.update_onboarding(conn, "@guided", discord_id="123", guided_at="210.0")
     conn.close()
     sent = []
     monkeypatch.setattr(send_dm, "post",
@@ -61,3 +62,30 @@ def test_engagement_dm_allows_a_guided_completed_creator(tmp_path, monkeypatch):
     assert send_dm.main(["--profile-dir", str(tmp_path), "--user-id", "123",
                          "--text", "Come back"]) == 0
     assert sent == ["/users/@me/channels", "/channels/dm1/messages"]
+
+
+def test_engagement_dm_refuses_a_rejoiner_nudged_before_finishing(
+        tmp_path, monkeypatch, capsys):
+    """**The bug this test exists for.** Found in review of the ENG-299 rejoin fix (28 Sep
+    2026): this guard read a stored tiktok and role as completion. onboarding_tick keeps
+    both when a creator rejoins, and moves a returning creator who never replied to
+    nudged with no guided_at. They passed as a guided creator, so an engagement DM was
+    permitted to someone who had not finished onboarding again."""
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": {"engagement": True},
+        "onboarding": {"enabled": True},
+    }), encoding="utf-8")
+    conn = store.connect(ace_dir / "ace.db")
+    store.upsert_creator(conn, Creator(
+        handle="@back", tiktok="back.tt", role="Creator", onboarding_state="nudged"
+    ))
+    store.update_onboarding(conn, "@back", discord_id="123", nudged_at="300.0")
+    conn.close()
+    monkeypatch.setattr(send_dm, "bot_token",
+                        lambda _profile: (_ for _ in ()).throw(AssertionError("token read")))
+
+    assert send_dm.main(["--profile-dir", str(tmp_path), "--user-id", "123",
+                         "--text", "Come back"]) == 1
+    assert "guided creator" in capsys.readouterr().err

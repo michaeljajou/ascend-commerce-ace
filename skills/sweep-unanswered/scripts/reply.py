@@ -29,7 +29,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from _lib import brand  # noqa: E402
+from _lib import brand, store  # noqa: E402
 
 DISCORD_API = "https://discord.com/api/v10"
 DISCORD_MAX_CONTENT = 2000
@@ -71,7 +71,8 @@ def onboarding_target(profile: Path, channel_id: str) -> dict | None:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT tiktok, role, onboarding_state FROM creators WHERE thread_id = ? LIMIT 1",
+            "SELECT tiktok, role, onboarding_state, guided_at FROM creators"
+            " WHERE thread_id = ? LIMIT 1",
             (str(channel_id),),
         ).fetchone()
         conn.close()
@@ -130,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
             print("ERROR: onboarding is disabled for this profile.", file=sys.stderr)
             return 1
         target = onboarding_target(profile, args.channel_id)
-        completed = bool(target and target.get("tiktok") and target.get("role"))
+        completed = bool(target and store.onboarding_completed(target))
         active_onboarding = bool(
             target and not completed and target.get("onboarding_state") in {"new", "collecting"}
         )

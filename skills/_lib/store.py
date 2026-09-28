@@ -232,6 +232,27 @@ def get_onboarding(conn: sqlite3.Connection, handle: str) -> dict | None:
     return dict(r) if r else None
 
 
+def onboarding_completed(row: dict) -> bool:
+    """Whether THIS lifecycle finished, not whether the creator ever onboarded.
+
+    tiktok and role are remembered when a creator rejoins: onboarding_tick restarts the
+    row at ``collecting`` and clears its lifecycle stamps, because Discord stripped the
+    roles when they left and they need them assigned again. So the remembered values
+    alone prove nothing. ``complete`` marks the lifecycle finished and ``guided`` stamps
+    ``guided_at``, which survives the later guided, nudged, active, escalated and
+    resolved states. A restarted creator can reach nudged, escalated or flagged without
+    finishing, and carries no ``guided_at``.
+
+    Every guard that asks "is this creator done" uses this, so they cannot drift apart.
+    """
+    if not (row.get("tiktok") and row.get("role")):
+        return False
+    state = row.get("onboarding_state")
+    if state in ("new", "collecting"):
+        return False
+    return state == "complete" or bool(row.get("guided_at"))
+
+
 def update_onboarding(conn: sqlite3.Connection, handle: str, **fields) -> None:
     """Set arbitrary onboarding columns on a creator row (column names are code-controlled)."""
     if not fields:

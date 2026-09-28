@@ -20,7 +20,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from _lib import brand  # noqa: E402
+from _lib import brand, store  # noqa: E402
 
 DISCORD_API = "https://discord.com/api/v10"
 UA = "DiscordBot (https://github.com/michaeljajou/ascend-commerce-ace, 0.1)"
@@ -56,14 +56,14 @@ def is_guided_creator(profile: Path, user_id: str) -> bool:
         return False
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        row = conn.execute(
-            """SELECT 1 FROM creators
-               WHERE discord_id = ? AND tiktok IS NOT NULL AND role IS NOT NULL
-                 AND onboarding_state IN ('guided','nudged') LIMIT 1""",
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT tiktok, role, onboarding_state, guided_at FROM creators
+               WHERE discord_id = ? AND onboarding_state IN ('guided','nudged')""",
             (str(user_id),),
-        ).fetchone()
+        ).fetchall()
         conn.close()
-        return row is not None
+        return any(store.onboarding_completed(dict(row)) for row in rows)
     except sqlite3.Error:
         return False
 
