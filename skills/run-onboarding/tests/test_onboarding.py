@@ -567,7 +567,9 @@ def record_role_assignments(monkeypatch):
     return granted
 
 
-@pytest.mark.parametrize("state", ["new", "collecting", "nudged", "escalated", "flagged"])
+@pytest.mark.parametrize("state", [
+    "new", "collecting", "nudged", "escalated", "resolved", "active", "flagged",
+])
 def test_remembered_fields_in_a_restarted_lifecycle_are_not_completion(
         conn, offline, monkeypatch, state):
     """**The bug this test exists for.** ENG-299 agent review round 3 (28 Sep 2026): the
@@ -575,8 +577,8 @@ def test_remembered_fields_in_a_restarted_lifecycle_are_not_completion(
     onboarding_tick keeps both when a creator rejoins and restarts the row at collecting,
     because Discord stripped their roles when they left. answer() returned
     already_complete with the redirect, so the returning creator never got their roles
-    back. nudged, escalated and flagged are here because a restarted creator reaches them
-    without finishing: they carry no guided_at."""
+    back. The states after collecting are here because a restarted creator who goes quiet
+    or gets stuck reaches them without finishing: they carry no guided_at."""
     seed_remembered_creator(conn, state)
     granted = record_role_assignments(monkeypatch)
 
