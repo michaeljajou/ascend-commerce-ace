@@ -10,8 +10,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import slack_cli  # noqa: E402
 
 
-def make_profile(tmp_path, *, slack_channel="#ace-escalations", brand_name="Glow Labs"):
+def make_profile(tmp_path, *, slack_channel="#ace-escalations", brand_name="Glow Labs",
+                 features=None, onboarding=None):
     ace = {"brand_id": "test-brand", "brand_name": brand_name, "slack_channel": slack_channel}
+    if features is not None:
+        ace["features"] = features
+    if onboarding is not None:
+        ace["onboarding"] = onboarding
     (tmp_path / "config.yaml").write_text(yaml.safe_dump({"ace": ace}), encoding="utf-8")
     (tmp_path / ".env").write_text("SLACK_BOT_TOKEN=xoxb-test\n", encoding="utf-8")
     return tmp_path
@@ -78,6 +83,38 @@ def test_ace_prefixed_token_wins(tmp_path, monkeypatch):
                                    encoding="utf-8")
     rc, calls = run(tmp_path, monkeypatch, ["post", "--text", "hi"])
     assert rc == 0 and calls["token"] == "xoxb-ace"
+
+
+def test_disabled_general_qa_refuses_support_post_before_api_call(
+        tmp_path, monkeypatch, capsys):
+    make_profile(tmp_path, features={"general_qa": False})
+    rc, calls = run(tmp_path, monkeypatch, ["post", "--text", "support escalation"])
+    assert rc == 0
+    assert calls == {}
+    assert json.loads(capsys.readouterr().out) == {"disabled": "general_qa"}
+
+
+def test_onboarding_post_requires_enabled_policy_and_configured_channel(
+        tmp_path, monkeypatch, capsys):
+    make_profile(
+        tmp_path,
+        features={"general_qa": False},
+        onboarding={
+            "enabled": True,
+            "data_channel": "#ace-onboarding",
+            "slack_channel": "#ace-onboarding-help",
+        },
+    )
+    rc, calls = run(tmp_path, monkeypatch, [
+        "post", "--purpose", "onboarding", "--channel", "#ace-onboarding", "--text", "signup",
+    ])
+    assert rc == 0 and calls["channel"] == "#ace-onboarding"
+
+    rc, _ = run(tmp_path, monkeypatch, [
+        "post", "--purpose", "onboarding", "--channel", "#other", "--text", "wrong",
+    ])
+    assert rc == 1
+    assert "configured onboarding Slack channel" in capsys.readouterr().err
 
 
 # --- Discord/GitHub markdown → Slack mrkdwn ---------------------------------------------

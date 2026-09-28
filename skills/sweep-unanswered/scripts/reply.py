@@ -22,10 +22,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from _lib import brand  # noqa: E402
 
 DISCORD_API = "https://discord.com/api/v10"
 DISCORD_MAX_CONTENT = 2000
@@ -58,6 +62,24 @@ def with_mention(text: str, user_id: str | None) -> str:
     return f"<@{user_id}> {text}"
 
 
+def onboarding_target(profile: Path, channel_id: str) -> dict | None:
+    """Return lifecycle evidence for a recorded creator onboarding thread."""
+    db_path = profile / "ace" / "ace.db"
+    if not db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT tiktok, role, onboarding_state FROM creators WHERE thread_id = ? LIMIT 1",
+            (str(channel_id),),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row is not None else None
+    except sqlite3.Error:
+        return None
+
+
 def post_reply(token: str, channel_id: str, text: str, reply_to: str | None) -> dict:
     payload: dict = {
         "content": text,
@@ -81,12 +103,46 @@ def post_reply(token: str, channel_id: str, text: str, reply_to: str | None) -> 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--profile-dir", default=os.environ.get("HERMES_HOME", "."))
+    ap.add_argument("--purpose", choices=("support", "onboarding", "engagement"),
+                    default="support")
     ap.add_argument("--channel-id", required=True)
     ap.add_argument("--reply-to", help="message id to reply to (recommended)")
     ap.add_argument("--mention", help="the creator's Discord user id — their <@id> tag goes in the text")
     ap.add_argument("--text", help="reply text (prefer --stdin with a quoted heredoc)")
     ap.add_argument("--stdin", action="store_true", help="read reply text from stdin")
     args = ap.parse_args(argv)
+
+    profile = Path(args.profile_dir)
+    try:
+        policy = brand.load_policy(profile)
+    except brand.PolicyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if args.purpose == "support" and not policy["general_qa"]:
+        print(json.dumps({"disabled": "general_qa"}))
+        return 0
+    if args.purpose == "engagement" and not policy["engagement"]:
+        print(json.dumps({"disabled": "engagement"}))
+        return 0
+    if args.purpose in {"onboarding", "engagement"}:
+        onboarding = (brand.config(profile).get("onboarding") or {})
+        if not onboarding.get("enabled"):
+            print("ERROR: onboarding is disabled for this profile.", file=sys.stderr)
+            return 1
+        target = onboarding_target(profile, args.channel_id)
+        completed = bool(target and target.get("tiktok") and target.get("role"))
+        active_onboarding = bool(
+            target and not completed and target.get("onboarding_state") in {"new", "collecting"}
+        )
+        if args.purpose == "onboarding" and not active_onboarding:
+            print("ERROR: onboarding replies must target an active creator onboarding thread.",
+                  file=sys.stderr)
+            return 1
+        if args.purpose == "engagement" and (
+            not completed or target.get("onboarding_state") not in {"guided", "nudged"}
+        ):
+            print("ERROR: engagement replies must target a guided creator thread.", file=sys.stderr)
+            return 1
 
     text = clean_text(sys.stdin.read() if args.stdin else args.text or "")
     if not text:
@@ -97,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: reply is {len(text)} characters; Discord allows {DISCORD_MAX_CONTENT}. "
               "Shorten it.", file=sys.stderr)
         return 1
-    token = bot_token(Path(args.profile_dir))
+    token = bot_token(profile)
     if not token:
         print("ERROR: DISCORD_BOT_TOKEN not set and not found in the profile .env.", file=sys.stderr)
         return 1

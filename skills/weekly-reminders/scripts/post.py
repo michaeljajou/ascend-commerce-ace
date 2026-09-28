@@ -81,6 +81,14 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     profile = Path(args.profile_dir) if args.profile_dir else brand.profile_dir()
 
+    try:
+        if not brand.feature_enabled("announcements", profile):
+            print(json.dumps({"disabled": "announcements"}))
+            return 0
+    except brand.PolicyError as exc:
+        _err(str(exc))
+        return 1
+
     text = clean_text(sys.stdin.read() if args.stdin else (args.text or ""))
     if not text:
         _err("empty reminder text.")

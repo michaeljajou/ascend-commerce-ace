@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import assign_role  # noqa: E402
 import onboarding  # noqa: E402
 
-from _lib import sheet, store  # noqa: E402
+from _lib import brand, sheet, store  # noqa: E402
 
 
 @pytest.fixture
@@ -114,6 +114,26 @@ def test_resolve_and_flag(conn):
 
 def test_status_unknown_creator(conn):
     assert onboarding.status(conn, "@ghost")["error"] == "not found"
+
+
+@pytest.mark.parametrize("argv", [
+    ["start", "--handle", "@blocked"],
+    ["context", "--handle", "@blocked"],
+])
+def test_disabled_onboarding_cli_refuses_before_opening_store(
+        argv, tmp_path, monkeypatch, capsys):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    brand.write_sidecar(tmp_path, {
+        "features": {"general_qa": False},
+        "onboarding": {"enabled": False},
+    })
+    monkeypatch.setenv("ACE_DATA_DIR", str(ace_dir))
+    monkeypatch.setattr(store, "connect",
+                        lambda *_args: (_ for _ in ()).throw(AssertionError("store opened")))
+
+    assert onboarding.main(argv) == 0
+    assert __import__("json").loads(capsys.readouterr().out) == {"disabled": "onboarding"}
 
 
 def test_stats_shape(conn):
@@ -514,6 +534,54 @@ def test_answer_on_an_already_finished_creator_does_not_redo_collection(conn, of
     onboarding.set_fields(conn, "@ava", tiktok="ava.tt", email="a@x.com", phone="+1 555 010 0100")
     out = onboarding.answer(conn, "@ava", "thanks!")
     assert out["ask"] is None and out["state"] == onboarding.COMPLETE
+
+
+def test_post_completion_message_never_repeats_completion_side_effects(conn, monkeypatch):
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.set_fields(conn, "@ava", tiktok="ava.tt")
+    onboarding.complete(conn, "@ava", now=200.0)
+    monkeypatch.setattr(onboarding, "complete",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("completed twice")))
+
+    out = onboarding.answer(conn, "@ava", "Can you answer a general question?", now=300.0)
+
+    assert out["already_complete"] is True
+    assert out["next_step"] == "redirect"
+    assert out["ask"] is None
+
+
+def test_completion_returns_bounded_profile_guidance_without_reading_yaml(conn, tmp_path, monkeypatch):
+    monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "ace"))
+    brand.write_sidecar(tmp_path, {
+        "onboarding": {"guidance": {
+            "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
+            "getting_started": ["Introduce yourself."],
+            "how_to_reach_team": "Ask the Agency Team in #help-desk.",
+        }}
+    })
+    onboarding.start(conn, "@ava", now=100.0)
+    store.update_onboarding(conn, "@ava", discord_id="42")
+    onboarding.answer(conn, "@ava", "ava.tt")
+    onboarding.answer(conn, "@ava", "skip")
+
+    out = onboarding.answer(conn, "@ava", "skip")
+
+    assert out["next_step"] == "guidance"
+    assert out["guidance"]["channels"][0]["channel"] == "#start-here"
+    assert out["guidance"]["how_to_reach_team"].startswith("Ask the Agency Team")
+
+
+def test_context_exposes_only_the_current_onboarding_step(conn):
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.answer(conn, "@ava", "ava.tt")
+    context = onboarding.conversation_context(conn, "@ava")
+    assert context == {
+        "handle": "@ava",
+        "state": "collecting",
+        "ask": "email",
+        "question": onboarding.FIELD_PROMPTS["email"],
+        "outside_scope": onboarding.ONBOARDING_REDIRECT,
+    }
 
 
 def test_one_bad_field_does_not_discard_the_good_ones_beside_it(conn):

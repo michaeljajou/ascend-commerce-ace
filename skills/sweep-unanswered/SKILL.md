@@ -17,6 +17,12 @@ This skill is the other half: a **zero-token cron script** (`ace-sweep.py`, ever
 watches the engaged channels and wakes the agent ONLY when a creator message has gone
 unanswered by the team for the grace window (default 10 min). You are that woken agent.
 
+## Feature policy
+This skill requires `ace.features.general_qa`. The sweep script checks the effective policy before
+reading Discord. If the feature is disabled, do not classify candidates, call grounding helpers,
+reply, log support interactions, or escalate them. A stale cron invocation or explicit skill
+request cannot override the policy.
+
 ## When to Use
 You are invoked by the sweep cron job with a JSON payload of `unanswered_creator_messages`
 (channel, channel_id, message_id, author, author_id, mention, posted_at, content) and a

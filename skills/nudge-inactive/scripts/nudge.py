@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
 
-from _lib import store  # noqa: E402
+from _lib import brand, store  # noqa: E402
 
 HOUR = 3600.0
 
@@ -43,6 +43,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--nudge-after-h", type=float, default=48)
     ap.add_argument("--flag-after-h", type=float, default=168)
     args = ap.parse_args(argv)
+
+    try:
+        if not brand.feature_enabled("engagement"):
+            print(json.dumps({"disabled": "engagement"}))
+            return 0
+    except brand.PolicyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     conn = store.connect()
     print(json.dumps(run_nudges(conn, nudge_after_h=args.nudge_after_h, flag_after_h=args.flag_after_h)))

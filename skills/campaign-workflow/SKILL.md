@@ -14,6 +14,11 @@ metadata:
 Campaign/challenge announcements are unique each time, so the team supplies the specifics. This
 runs a Slack-mediated draft → approve → post flow.
 
+## Feature policy
+Use this skill only when `ace.features.announcements` is enabled. When disabled, do not open a
+Slack thread, collect a brief, draft, schedule, or post. Team approval does not override the
+profile policy.
+
 ## When to Use
 ~3 days before a campaign/challenge is scheduled to launch (team-scheduled or calendar-triggered).
 

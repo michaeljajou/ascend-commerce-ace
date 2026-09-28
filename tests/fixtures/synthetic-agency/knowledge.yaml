@@ -1,0 +1,15 @@
+brand:
+  name: Synthetic Creator Agency
+onboarding:
+  channels:
+    - channel: "#synthetic-start"
+      purpose: Complete agency setup and read the welcome details.
+    - channel: "#synthetic-community"
+      purpose: Meet other synthetic creators after setup.
+  getting_started:
+    - Introduce yourself in "#synthetic-community".
+    - Review the pinned synthetic creator checklist.
+  how_to_reach_team: "Use #synthetic-help to contact the Synthetic Agency Team."
+faq:
+  - question: What is the synthetic campaign rate?
+    answer: This field is intentionally outside onboarding guidance.

@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
 
-from _lib import knowledge  # noqa: E402
+from _lib import brand, knowledge  # noqa: E402
 
 
 def run(kb: dict, query: str | None = None, section: str | None = None) -> str:
@@ -34,6 +34,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--section", help="return a single named section")
     ap.add_argument("--path", help="explicit knowledge file path (defaults to the profile's)")
     args = ap.parse_args(argv)
+
+    profile = brand.profile_dir()
+    try:
+        if not brand.feature_enabled("general_qa", profile):
+            print(__import__("json").dumps({"disabled": "general_qa"}))
+            return 0
+    except brand.PolicyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     try:
         kb = knowledge.load_knowledge(args.path)

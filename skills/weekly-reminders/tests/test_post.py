@@ -110,3 +110,14 @@ def test_missing_directory_or_post_channel_is_a_clear_error(tmp_path, monkeypatc
     prof = make_profile(tmp_path / "b", brand=no_post)
     assert post.main(["--profile-dir", str(prof), "--text", "hi"]) == 1
     assert "POST_ONLY" in capsys.readouterr().err
+
+
+def test_disabled_announcements_exit_before_discord_reads(tmp_path, monkeypatch, capsys):
+    restricted = {**BRAND, "features": {"announcements": False}}
+    make_profile(tmp_path, brand=restricted)
+    monkeypatch.setattr(post, "recent_own_post",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("Discord read")))
+    monkeypatch.setattr(post, "post_message",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("Discord write")))
+    assert post.main(["--profile-dir", str(tmp_path), "--text", "do not post"]) == 0
+    assert json.loads(capsys.readouterr().out)["disabled"] == "announcements"

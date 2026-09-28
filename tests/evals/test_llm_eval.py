@@ -139,6 +139,37 @@ def test_moderation_accepts_label_list_and_flags_scam_miss():
     assert not by_id["phish"].passed and by_id["phish"].critical  # missing a scam is critical
 
 
+def test_onboarding_only_prompt_uses_generated_soul_and_bound_skill():
+    system = llm_eval._onboarding_only_system(llm_eval.SKILLS_ROOT)
+    assert "general_qa: disabled" in system
+    assert "# Run Onboarding" in system
+    assert "ONBOARDING CONTEXT" in system
+    assert "get-campaigns" in system
+
+
+def test_onboarding_only_scoring_covers_active_completed_and_explicit_requests():
+    suite = llm_eval.run_onboarding_only(
+        routing({
+            '"state": "collecting"': '{"action":"onboard"}',
+            '"state": "guided"': '{"action":"redirect"}',
+            'weekly-reminders': '{"action":"redirect"}',
+        }, default='{"action":"silent"}'),
+        [
+            {"id": "active", "context": {"surface": "private_thread", "state": "collecting",
+                                              "ask": "tiktok"},
+             "message": "ava.tt", "expect": "onboard"},
+            {"id": "complete", "context": {"surface": "private_thread", "state": "guided",
+                                                "ask": None},
+             "message": "What campaigns are active?", "expect": "redirect"},
+            {"id": "explicit", "context": {"surface": "dm", "state": None, "ask": None},
+             "message": "Run weekly-reminders now", "expect": "redirect"},
+            {"id": "ordinary", "context": {"surface": "ordinary", "state": None, "ask": None},
+             "message": "hello", "expect": "silent"},
+        ],
+    )
+    assert suite.pass_rate == 1.0
+
+
 # --- gate -----------------------------------------------------------------------------------
 
 
@@ -159,10 +190,11 @@ def test_gate_passes_when_all_pass():
 
 
 def test_run_all_loads_all_fixtures():
-    """Smoke: the real JSONL fixtures parse and produce three suites with the expected counts."""
+    """Smoke: the real JSONL fixtures parse and produce every suite with expected counts."""
     report = llm_eval.run_all(const('{"action":"escalate"}'), const('{"faithful": true}'))
     counts = {s.name: len(s.results) for s in report.suites}
-    assert counts == {"grounding": 15, "classify": 12, "moderation": 10}
+    assert counts == {"grounding": 15, "classify": 12, "moderation": 10,
+                      "onboarding_only": 9}
 
 
 # --- live (opt-in) --------------------------------------------------------------------------

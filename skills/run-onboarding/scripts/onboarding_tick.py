@@ -43,6 +43,7 @@ SLACK_API = "https://slack.com/api"
 UA = "DiscordBot (https://github.com/michaeljajou/ascend-commerce-ace, 0.1)"
 SILENT = json.dumps({"wakeAgent": False})
 RESOLVE_EMOJI = "white_check_mark"  # ✅ on the Slack escalation = one-click resolve
+FEATURE_NAMES = {"general_qa", "moderation", "announcements", "engagement", "reporting"}
 
 # Mirror of _lib/store.py ONBOARDING_MIGRATIONS — update both together.
 MIGRATIONS = [
@@ -136,6 +137,22 @@ def effective_windows(ob: dict) -> tuple[timedelta, timedelta]:
                 timedelta(minutes=float(ob.get("test_escalate_minutes", 8))))
     return (timedelta(hours=float(ob.get("nudge_hours", 48))),
             timedelta(days=float(ob.get("escalate_days", 7))))
+
+
+def feature_enabled(ace_config: dict, name: str) -> bool:
+    """Self-contained policy check for the profile-copied tick script."""
+    if "features" not in ace_config:
+        return True
+    features = ace_config["features"]
+    if not isinstance(features, dict):
+        raise ValueError("ace.features must be an object")
+    unknown = sorted(set(features) - FEATURE_NAMES)
+    invalid = sorted(key for key, value in features.items() if type(value) is not bool)
+    if unknown:
+        raise ValueError(f"unknown ace.features names: {unknown}")
+    if invalid:
+        raise ValueError(f"ace.features values must be booleans: {invalid}")
+    return features.get(name, True)
 
 
 def is_new_joiner(member: dict, known_ids: set[str], team_role_id: str | None) -> bool:
@@ -413,6 +430,12 @@ def main(argv: list[str] | None = None) -> int:
     config = yaml.safe_load((profile / "config.yaml").read_text(encoding="utf-8")) or {}
     ace = config.get("ace") or {}
     ob = ace.get("onboarding") or {}
+    try:
+        engagement_enabled = feature_enabled(ace, "engagement")
+    except ValueError as exc:
+        print(SILENT)
+        print(f"onboarding: invalid feature policy: {exc}", file=sys.stderr)
+        return 1
     if not args.joins_only:  # the cron run supervises the listener (start/stop with the switch)
         ensure_listener(profile, bool(ob.get("enabled")))
     if not ob.get("enabled"):
@@ -510,7 +533,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # 3. engagement scan: any post anywhere → guided/nudged creators become active
         directory_path = profile / "channel_directory.json"
-        if directory_path.exists():
+        if engagement_enabled and directory_path.exists():
             directory = json.loads(directory_path.read_text(encoding="utf-8"))
             watch_ids = {r["discord_id"]: r["handle"] for r in conn.execute(
                 "SELECT discord_id, handle FROM creators WHERE onboarding_state IN ('guided','nudged')"
@@ -543,12 +566,13 @@ def main(argv: list[str] | None = None) -> int:
             "SELECT * FROM creators WHERE onboarding_state IN "
             "('collecting','guided','nudged','escalated')"
         )]
+        timer_rows = rows if engagement_enabled else [r for r in rows if not r.get("guided_at")]
 
         # 4a. nudges — mark on emit (at-most-once):
         #   collecting (never replied to the welcome): FIXED reminder copy → this script
         #   DMs it directly, zero tokens. guided (finished setup, went quiet): the agent
         #   composes a campaign-flavored nudge in the brand voice → wake it.
-        for r in due_nudges(rows, now, nudge_window):
+        for r in due_nudges(timer_rows, now, nudge_window):
             upd(conn, r["handle"], onboarding_state="nudged", nudged_at=str(now.timestamp()))
             if r["onboarding_state"] == "collecting":
                 link = f"https://discord.com/channels/{guild_id}/{r['thread_id']}"
@@ -565,7 +589,7 @@ def main(argv: list[str] | None = None) -> int:
         # 4b. escalations → pure-script Slack post, zero tokens
         # (ACE_ prefix: a bare SLACK_BOT_TOKEN makes the gateway retry a Slack platform forever)
         slack_token = env_token(profile, "ACE_SLACK_BOT_TOKEN") or env_token(profile, "SLACK_BOT_TOKEN")
-        for r in due_escalations(rows, now, escalate_window):
+        for r in due_escalations(timer_rows, now, escalate_window):
             if not slack_token:
                 print("onboarding: escalation due but no SLACK_BOT_TOKEN — skipping.", file=sys.stderr)
                 break
@@ -598,10 +622,10 @@ def main(argv: list[str] | None = None) -> int:
         # 5. archive closed-out threads after the configured window
         archive_after = timedelta(days=float(ob.get("archive_days", 7)))
         for r in conn.execute(
-            """SELECT handle, thread_id, last_active_at, resolved_at FROM creators
-               WHERE thread_id IS NOT NULL AND onboarding_state IN ('active','resolved')"""
+            """SELECT handle, thread_id, last_active_at, resolved_at, guided_at FROM creators
+               WHERE thread_id IS NOT NULL AND onboarding_state IN ('guided','active','resolved')"""
         ).fetchall():
-            anchor = r["resolved_at"] or r["last_active_at"]
+            anchor = r["resolved_at"] or r["last_active_at"] or r["guided_at"]
             if anchor and now - datetime.fromtimestamp(float(anchor), tz=timezone.utc) >= archive_after:
                 archive_thread(token, r["thread_id"])
                 upd(conn, r["handle"], thread_id=None)

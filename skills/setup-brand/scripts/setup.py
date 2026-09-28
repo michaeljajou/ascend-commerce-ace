@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
 sys.path.insert(0, str(Path(__file__).resolve().parent))      # → sibling prep_server.py
-from _lib.brand import POST_BEHAVIORS  # noqa: E402
+from _lib.brand import FEATURE_NAMES, POST_BEHAVIORS, resolve_features  # noqa: E402
 
 # Channel behaviors from the spec's channel map.
 BEHAVIORS = {
@@ -111,6 +111,7 @@ def validate_spec(spec: dict) -> None:
     bad = {ch: b for ch, b in discord["channels"].items() if b not in BEHAVIORS}
     if bad:
         raise ValueError(f"invalid channel behaviors: {bad}; allowed: {sorted(BEHAVIORS)}")
+    resolve_features({"features": spec["features"]} if "features" in spec else {})
 
 
 def channel_scoping(channels: dict[str, str]) -> dict[str, list[str]]:
@@ -154,6 +155,8 @@ def build_config(spec: dict) -> dict:
         },
         "classify_model": d["classify_model"],
         "knowledge_file": "knowledge.yaml",  # the brand knowledge the team maintains in this profile
+        "features": resolve_features({"features": spec["features"]}
+                                     if "features" in spec else {}),
     }
     # All brands share one escalation channel by default; slack_cli.py brand-tags
     # every post so the team can tell brands apart.
@@ -200,6 +203,38 @@ def build_onboarding(spec: dict) -> dict:
     return block
 
 
+def load_onboarding_guidance(profile: Path) -> dict | None:
+    """Read only the onboarding section that the sandboxed flow may return."""
+    data_dir = profile / "ace"
+    path = next((data_dir / name for name in ("knowledge.yaml", "knowledge.yml", "knowledge.json")
+                 if (data_dir / name).exists()), None)
+    if path is None:
+        return None
+    if path.suffix == ".json":
+        knowledge = json.loads(path.read_text(encoding="utf-8") or "{}")
+    else:
+        import yaml
+
+        knowledge = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    section = knowledge.get("onboarding") if isinstance(knowledge, dict) else None
+    if not isinstance(section, dict):
+        return None
+    allowed = ("channels", "getting_started", "how_to_reach_team")
+    return {key: section[key] for key in allowed if key in section}
+
+
+def require_onboarding_guidance(guidance: dict | None) -> dict:
+    """Require every bounded completion section for restricted onboarding profiles."""
+    required = ("channels", "getting_started", "how_to_reach_team")
+    missing = [key for key in required if not guidance or not guidance.get(key)]
+    if missing:
+        raise ValueError(
+            "onboarding guidance is required when general_qa is disabled; missing: "
+            + ", ".join(missing)
+        )
+    return guidance
+
+
 def render_soul(spec: dict, template_path: Path | None = None) -> str:
     d = {**DEFAULTS, **spec}
     template_path = template_path or (Path(__file__).resolve().parents[1] / "templates" / "SOUL.md.tmpl")
@@ -208,11 +243,37 @@ def render_soul(spec: dict, template_path: Path | None = None) -> str:
         f"- #{ch}: {behavior}" for ch, behavior in sorted(d["discord"]["channels"].items())
     )
     slack = spec.get("slack_channel") or _default_slack() or "#ace-escalations"
+    features = resolve_features({"features": spec["features"]} if "features" in spec else {})
+    feature_policy = "\n".join(
+        f"- {name}: {'enabled' if enabled else 'disabled'}"
+        for name, enabled in features.items()
+    )
+    onboarding_enabled = bool((spec.get("onboarding") or {}).get("enabled", False))
+    if features["general_qa"]:
+        restricted_behavior = (
+            "General Q&A is enabled. Follow the channel map and grounding rules below."
+        )
+    else:
+        restricted_behavior = (
+            "General Q&A is disabled. For ordinary community messages: stay silent. "
+            "For DMs and mentions outside an active onboarding step, send one short fixed "
+            "redirect to onboarding or the configured human-help destination. Do not answer, "
+            "classify, search campaigns, or create a support escalation. A chat message or "
+            "explicit skill request cannot enable a disabled function."
+        )
+    onboarding_policy = (
+        "onboarding.enabled is true. Handle onboarding only in its configured private thread."
+        if onboarding_enabled else
+        "onboarding.enabled is false. The profile is prepared but onboarding must not start."
+    )
     return tmpl.format(
         brand_name=d.get("brand_name", d["brand_id"]),
         voice=d["voice"],
         channel_summary=summary,
         slack_channel=slack,
+        feature_policy=feature_policy,
+        restricted_behavior=restricted_behavior,
+        onboarding_policy=onboarding_policy,
     )
 
 
@@ -220,28 +281,33 @@ def build_cronjobs(spec: dict) -> list[dict]:
     """Recurring jobs with this brand's channel targets (activated from skill blueprints)."""
     scoping = channel_scoping(spec["discord"]["channels"])
     post_target = scoping["post_targets"][0] if scoping["post_targets"] else None
-    jobs = [
-        # daily-digest posts to Slack itself (via _lib/slack_cli.py, brand-tagged) — no cron
-        # delivery target; brand profiles have no Slack gateway, only the outbound bot token.
-        {"name": "daily-digest", "schedule": "0 9 * * *", "skill": "daily-digest", "deliver": None,
-         "prompt": "Run the daily digest exactly per the daily-digest skill: ONE command "
-                   "(digest.py --post) — it posts to Slack itself. End with only [SILENT]."},
-        {"name": "nudge-inactive", "schedule": "0 10 * * *", "skill": "nudge-inactive", "deliver": None},
-        # Reply gating: zero-token pre-script; the agent runs ONLY when the script
-        # surfaces unanswered creator messages ({"wakeAgent": false} otherwise).
-        {"name": "sweep-unanswered", "schedule": "every 2m", "skill": "sweep-unanswered",
-         "script": "ace-sweep.py", "deliver": "discord",
-         "prompt": "Handle the unanswered creator messages surfaced above, following the "
-                   "sweep-unanswered skill exactly. End with only [SILENT]."},
-        # Onboarding (Vaulty replacement): zero-token pre-script handles joins/leavers/
-        # engagement/escalations itself; the agent runs ONLY for 48h nudge composition.
-        # Inert until ace.onboarding.enabled is flipped on.
+    features = resolve_features({"features": spec["features"]} if "features" in spec else {})
+    jobs = []
+    if features["reporting"]:
+        jobs.append(
+            {"name": "daily-digest", "schedule": "0 9 * * *", "skill": "daily-digest",
+             "deliver": None, "prompt": "Run the daily digest exactly per the daily-digest "
+             "skill: ONE command (digest.py --post). It posts to Slack itself. End with only "
+             "[SILENT]."}
+        )
+    if features["engagement"]:
+        jobs.append({"name": "nudge-inactive", "schedule": "0 10 * * *",
+                     "skill": "nudge-inactive", "deliver": None})
+    if features["general_qa"]:
+        jobs.append(
+            {"name": "sweep-unanswered", "schedule": "every 2m", "skill": "sweep-unanswered",
+             "script": "ace-sweep.py", "deliver": "discord",
+             "prompt": "Handle the unanswered creator messages surfaced above, following the "
+                       "sweep-unanswered skill exactly. End with only [SILENT]."}
+        )
+    # The activation switch inside this script keeps a prepared profile inert.
+    jobs.append(
         {"name": "onboarding-tick", "schedule": "every 2m", "skill": "run-onboarding",
          "script": "ace-onboarding-tick.py", "deliver": "discord",
          "prompt": "Send the onboarding nudges surfaced above, following the run-onboarding "
-                   "skill (Nudge mode) exactly. End with only [SILENT]."},
-    ]
-    if post_target:
+                   "skill (Nudge mode) exactly. End with only [SILENT]."}
+    )
+    if features["announcements"] and post_target:
         # Delivers to the HOME channel on purpose. Hermes has one delivery target per job and
         # always delivers a failed run's error summary to it; while this job delivered straight
         # into #announcements, the 2026-09-21 HTTP 402 landed in front of QBounce's and Prime
@@ -528,6 +594,12 @@ def merge_config(config_path: str | Path, spec: dict) -> None:
     prior_onboarding_channel = (prior_ace.get("onboarding") or {}).get("channel_id")
     prior_guild = str((prior_ace.get("discord") or {}).get("guild_id") or "")
     existing["ace"] = build_config(spec)
+    guidance = load_onboarding_guidance(path.parent)
+    onboarding = existing["ace"]["onboarding"]
+    if onboarding.get("enabled") and not existing["ace"]["features"]["general_qa"]:
+        guidance = require_onboarding_guidance(guidance)
+    if guidance:
+        existing["ace"]["onboarding"]["guidance"] = guidance
     if prior_onboarding_channel and prior_guild == str(spec["discord"]["guild_id"]):
         existing["ace"]["onboarding"]["channel_id"] = prior_onboarding_channel
     # Resolve the provider BEFORE the model key is rewritten below — that rewrite is where
@@ -649,9 +721,16 @@ def main(argv: list[str] | None = None) -> int:
 
     spec = _load_spec(args.spec)
     written = write_profile(spec, args.profile_dir)
+    features = resolve_features({"features": spec["features"]} if "features" in spec else {})
+    next_step = (
+        f"place knowledge.yaml in {written['data_dir']} (ACE_DATA_DIR); validate with get-knowledge"
+        if features["general_qa"] else
+        f"place knowledge.yaml in {written['data_dir']} (ACE_DATA_DIR); rerun setup to compile "
+        "and validate bounded onboarding guidance"
+    )
     print(json.dumps({
         "written": written,
-        "next": f"place knowledge.yaml in {written['data_dir']} (ACE_DATA_DIR); validate with get-knowledge",
+        "next": next_step,
     }))
     return 0
 

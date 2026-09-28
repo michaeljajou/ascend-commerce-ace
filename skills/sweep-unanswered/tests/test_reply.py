@@ -7,6 +7,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import reply  # noqa: E402
 
+from _lib import store  # noqa: E402
+from _lib.models import Creator  # noqa: E402
+
 
 def test_posts_reply_with_reference_and_safe_mentions(tmp_path, monkeypatch, capsys):
     (tmp_path / ".env").write_text("DISCORD_BOT_TOKEN=tok\n", encoding="utf-8")
@@ -110,3 +113,95 @@ def test_main_applies_mention(tmp_path, monkeypatch):
     assert reply.main(["--profile-dir", str(tmp_path), "--channel-id", "555", "--reply-to", "101",
                        "--mention", "42", "--text", "Hey! Samples ship Fridays."]) == 0
     assert sent["text"] == "<@42> Hey! Samples ship Fridays."
+
+
+def test_disabled_general_qa_refuses_support_reply_before_token_read(
+        tmp_path, monkeypatch, capsys):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": {"general_qa": False},
+        "onboarding": {"enabled": True, "channel_id": "777"},
+    }), encoding="utf-8")
+    monkeypatch.setattr(reply, "bot_token",
+                        lambda _profile: (_ for _ in ()).throw(AssertionError("token read")))
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--channel-id", "555",
+                       "--text", "Support answer"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"disabled": "general_qa"}
+
+
+def test_onboarding_reply_requires_a_recorded_active_creator_thread(
+        tmp_path, monkeypatch, capsys):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": {"general_qa": False},
+        "onboarding": {"enabled": True, "channel_id": "777"},
+    }), encoding="utf-8")
+    monkeypatch.setattr(reply, "bot_token",
+                        lambda _profile: (_ for _ in ()).throw(AssertionError("token read")))
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "onboarding",
+                       "--channel-id", "777", "--text", "Continue onboarding"]) == 1
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "onboarding",
+                       "--channel-id", "555", "--text", "Wrong channel"]) == 1
+    assert "active creator onboarding thread" in capsys.readouterr().err
+
+
+def test_onboarding_reply_allows_a_recorded_creator_thread(tmp_path, monkeypatch):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": {"general_qa": False},
+        "onboarding": {"enabled": True, "channel_id": "777"},
+    }), encoding="utf-8")
+    (tmp_path / ".env").write_text("DISCORD_BOT_TOKEN=tok\n", encoding="utf-8")
+    conn = store.connect(ace_dir / "ace.db")
+    store.upsert_creator(conn, Creator(handle="@new", onboarding_state="collecting"))
+    store.update_onboarding(conn, "@new", thread_id="888")
+    conn.close()
+    sent = {}
+    monkeypatch.setattr(reply, "post_reply",
+                        lambda token, cid, text, rt: sent.update(channel=cid) or {"id": "9"})
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "onboarding",
+                       "--channel-id", "888", "--text", "Continue onboarding"]) == 0
+    assert sent["channel"] == "888"
+
+
+def test_onboarding_reply_refuses_a_completed_creator_thread(tmp_path, monkeypatch, capsys):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": {"general_qa": False, "engagement": True},
+        "onboarding": {"enabled": True, "channel_id": "777"},
+    }), encoding="utf-8")
+    conn = store.connect(ace_dir / "ace.db")
+    store.upsert_creator(conn, Creator(
+        handle="@done", tiktok="done.tt", role="creator", onboarding_state="guided"
+    ))
+    store.update_onboarding(conn, "@done", thread_id="999")
+    conn.close()
+    monkeypatch.setattr(reply, "bot_token",
+                        lambda _profile: (_ for _ in ()).throw(AssertionError("token read")))
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "onboarding",
+                       "--channel-id", "999", "--text", "Support answer"]) == 1
+    assert "active creator onboarding thread" in capsys.readouterr().err
+
+
+def test_disabled_engagement_refuses_recorded_thread_nudge_before_token_read(
+        tmp_path, monkeypatch, capsys):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": {"general_qa": False, "engagement": False},
+        "onboarding": {"enabled": True, "channel_id": "777"},
+    }), encoding="utf-8")
+    monkeypatch.setattr(reply, "bot_token",
+                        lambda _profile: (_ for _ in ()).throw(AssertionError("token read")))
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "engagement",
+                       "--channel-id", "888", "--text", "Come back"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"disabled": "engagement"}

@@ -101,14 +101,17 @@ def test_escalation_text_has_all_required_fields():
 
 # ── main(): integration with mocked REST ───────────────────────────────────────
 
-def make_profile(tmp_path, *, enabled=True, test_mode=True, channel_id="900"):
+def make_profile(tmp_path, *, enabled=True, test_mode=True, channel_id="900", features=None):
     ob = {"enabled": enabled, "test_mode": test_mode, "channel_id": channel_id,
           "creator_roles": ["Creator"], "slack_channel": "#ace-escalations"}
-    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"ace": {
+    ace = {
         "brand_id": "pilot", "brand_name": "Pilot",
         "discord": {"guild_id": "g1", "team_role": "Ascend Team"},
         "onboarding": ob,
-    }}), encoding="utf-8")
+    }
+    if features is not None:
+        ace["features"] = features
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"ace": ace}), encoding="utf-8")
     (tmp_path / "channel_directory.json").write_text(json.dumps({"platforms": {"discord": [
         {"id": "555", "name": "community-chat", "type": "channel"},
         {"id": "900", "name": "onboarding", "type": "channel"},
@@ -262,6 +265,58 @@ def test_engagement_stops_the_clock(tmp_path, monkeypatch):
     out = run_tick(tmp_path, monkeypatch, fakes)
     assert db_row(tmp_path, "@chatty")["onboarding_state"] == "active"
     assert json.loads(out) == {"wakeAgent": False}                       # no nudge for active creators
+
+
+def test_engagement_disabled_skips_completed_creator_scans_and_nudges(tmp_path, monkeypatch):
+    make_profile(tmp_path, features={"engagement": False})
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, guided_at, joined_at)"
+                 " VALUES ('@done','guided','77','7001',?,?)", (ts_ago(minutes=30), ts_ago(minutes=40)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "done"}, "roles": []}])
+    real_discord = fakes.discord
+
+    def no_community_scan(token, path, payload=None, method=None):
+        if "/channels/555/messages" in path:
+            raise AssertionError("community messages read while engagement is disabled")
+        return real_discord(token, path, payload, method)
+
+    monkeypatch.setattr(tick, "discord", no_community_scan)
+    monkeypatch.setattr(tick, "slack", fakes.slack)
+    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+    assert tick.main(["--profile-dir", str(tmp_path)]) == 0
+    assert db_row(tmp_path, "@done")["onboarding_state"] == "guided"
+
+
+def test_engagement_disabled_keeps_unfinished_onboarding_reminders(tmp_path, monkeypatch):
+    make_profile(tmp_path, features={"engagement": False})
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at)"
+                 " VALUES ('@unfinished','collecting','77','7001',?)", (ts_ago(minutes=5),))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "unfinished"}, "roles": []}])
+    out = run_tick(tmp_path, monkeypatch, fakes)
+    assert json.loads(out) == {"wakeAgent": False}
+    assert db_row(tmp_path, "@unfinished")["onboarding_state"] == "nudged"
+
+
+def test_engagement_disabled_still_archives_completed_threads(tmp_path, monkeypatch):
+    make_profile(tmp_path, features={"engagement": False})
+    cfg_path = tmp_path / "config.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["ace"]["onboarding"]["archive_days"] = 0
+    cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, guided_at, joined_at)"
+                 " VALUES ('@done','guided','77','7001',?,?)", (ts_ago(minutes=1), ts_ago(minutes=5)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "done"}, "roles": []}])
+    run_tick(tmp_path, monkeypatch, fakes)
+    assert db_row(tmp_path, "@done")["thread_id"] is None
+    assert ("/channels/7001", {"archived": True, "locked": False}, "PATCH") in fakes.writes
 
 
 def test_quiet_creator_gets_nudge_wake_once(tmp_path, monkeypatch):

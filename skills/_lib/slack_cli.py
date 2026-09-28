@@ -28,6 +28,13 @@ from pathlib import Path
 
 SLACK_API = "https://slack.com/api/chat.postMessage"
 DEFAULT_CHANNEL = "#ace-escalations"
+PURPOSE_FEATURE = {
+    "support": "general_qa",
+    "moderation": "moderation",
+    "announcements": "announcements",
+    "engagement": "engagement",
+    "reporting": "reporting",
+}
 
 # --- Slack formatting -------------------------------------------------------------------
 # Agent-composed text arrives in Discord/GitHub flavor: **bold**, ### headers, and raw
@@ -130,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--text", help="message text (or use --stdin)")
     p.add_argument("--stdin", action="store_true", help="read message text from stdin")
     p.add_argument("--channel", help="override channel (default: ace.slack_channel from config)")
+    p.add_argument("--purpose", choices=(*PURPOSE_FEATURE, "onboarding"), default="support")
     args = ap.parse_args(argv)
 
     text = (sys.stdin.read() if args.stdin else args.text or "").strip()
@@ -139,8 +147,33 @@ def main(argv: list[str] | None = None) -> int:
 
     profile = profile_dir()
     ace = load_ace_config(profile)
-    text = slackify(text, profile)              # Discord/GitHub markdown → Slack mrkdwn
     channel = args.channel or ace.get("slack_channel") or DEFAULT_CHANNEL
+    brand_module = _brand()
+    try:
+        policy = brand_module.load_policy(profile)
+    except brand_module.PolicyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if feature := PURPOSE_FEATURE.get(args.purpose):
+        if not policy[feature]:
+            print(json.dumps({"disabled": feature}))
+            return 0
+    else:
+        onboarding = ace.get("onboarding") or {}
+        if not onboarding.get("enabled"):
+            print("ERROR: onboarding is disabled for this profile.", file=sys.stderr)
+            return 1
+        allowed_channels = {
+            value for value in (
+                onboarding.get("data_channel"), onboarding.get("slack_channel"),
+                ace.get("slack_channel"),
+            ) if value
+        }
+        if channel not in allowed_channels:
+            print("ERROR: onboarding posts must target a configured onboarding Slack channel.",
+                  file=sys.stderr)
+            return 1
+    text = slackify(text, profile)              # Discord/GitHub markdown → Slack mrkdwn
     brand = ace.get("brand_name") or ace.get("brand_id")
     if brand:
         text = f"[{brand}] {text}"

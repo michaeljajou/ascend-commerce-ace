@@ -14,6 +14,11 @@ metadata:
 Answer logistics questions **grounded in the brand's knowledge base** — and only when grounded.
 This is where the never-fabricate rule is enforced at the point of answering.
 
+## Feature policy
+Use this skill only when `ace.features.general_qa` is enabled. A DM, mention, operator request,
+or explicit skill request cannot enable it. When general Q&A is disabled, do not read knowledge,
+look up campaigns, answer the question, log an interaction, or escalate it as support work.
+
 ## When to Use
 After `classify-question` returns **HANDLE**.
 

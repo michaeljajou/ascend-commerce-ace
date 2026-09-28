@@ -14,6 +14,10 @@ metadata:
 Capture thumbs-up / thumbs-down reactions on Ace's answers so we can track answer quality and
 surface weak spots for KB improvement.
 
+## Feature policy
+Use this skill only when `ace.features.general_qa` is enabled. When it is disabled, do not record
+or respond to reactions on old Ace answers.
+
 ## When to Use
 When a creator reacts 👍 or 👎 to a message Ace posted that has a known `interaction_id`
 (returned by `answer-from-kb` when it logged the answer).

@@ -42,6 +42,23 @@ def test_validate_spec_rejects_bad_behavior():
         setup.validate_spec(spec)
 
 
+@pytest.mark.parametrize("features", [
+    {"unknown": False},
+    {"general_qa": 0},
+    {"moderation": "false"},
+    [],
+])
+def test_validate_spec_rejects_invalid_feature_policy(features):
+    with pytest.raises(ValueError):
+        setup.validate_spec(make_spec(features=features))
+
+
+def test_invalid_feature_policy_fails_before_profile_artifacts_are_written(tmp_path):
+    with pytest.raises(ValueError):
+        setup.write_profile(make_spec(features={"general_qa": "false"}), tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_channel_scoping_maps_behaviors():
     scoping = setup.channel_scoping(make_spec()["discord"]["channels"])
     assert scoping["free_response"] == ["campaigns", "community-chat", "our-products"]
@@ -59,6 +76,14 @@ def test_build_config_shape():
     assert cfg["classify_model"]          # default applied
     assert "model" not in cfg             # answer model lives at Hermes top-level, not in the ace block
     assert "drive_folder" not in cfg
+    assert cfg["features"] == {name: True for name in setup.FEATURE_NAMES}
+
+
+def test_build_config_preserves_explicit_disabled_features():
+    cfg = setup.build_config(make_spec(features={"general_qa": False, "reporting": False}))
+    assert cfg["features"]["general_qa"] is False
+    assert cfg["features"]["reporting"] is False
+    assert cfg["features"]["moderation"] is True
 
 
 def test_model_and_slack_optional(monkeypatch):
@@ -138,12 +163,44 @@ def test_render_soul_includes_voice_rules_and_channels():
     assert "#pilot-ops" in soul
 
 
+def test_render_soul_locks_disabled_functions_and_onboarding_redirects():
+    soul = setup.render_soul(make_spec(
+        features={name: False for name in setup.FEATURE_NAMES},
+        onboarding={"enabled": False},
+    ))
+    assert "general_qa: disabled" in soul
+    assert "ordinary community messages: stay silent" in soul
+    assert "DMs and mentions" in soul
+    assert "cannot enable a disabled function" in soul
+    assert "onboarding.enabled is false" in soul
+
+
 def test_build_cronjobs_targets_post_channel():
     jobs = {j["name"]: j for j in setup.build_cronjobs(make_spec())}
     assert set(jobs) >= {"daily-digest", "nudge-inactive", "weekly-reminders"}
     assert "ingest-knowledge" not in jobs  # no ingest step with YAML knowledge
     assert jobs["daily-digest"]["deliver"] is None   # digest posts via slack_cli.py itself
     assert jobs["weekly-reminders"]["deliver"] == "discord"   # home channel, see below
+
+
+@pytest.mark.parametrize("feature,missing_job", [
+    ("general_qa", "sweep-unanswered"),
+    ("engagement", "nudge-inactive"),
+    ("reporting", "daily-digest"),
+    ("announcements", "weekly-reminders"),
+])
+def test_build_cronjobs_filters_disabled_features(feature, missing_job):
+    jobs = {j["name"] for j in setup.build_cronjobs(make_spec(features={feature: False}))}
+    assert missing_job not in jobs
+    assert "onboarding-tick" in jobs
+
+
+def test_onboarding_only_profile_keeps_only_the_guarded_onboarding_tick():
+    spec = make_spec(features={name: False for name in setup.FEATURE_NAMES})
+    spec["onboarding"] = {"enabled": False}
+    jobs = setup.build_cronjobs(spec)
+    assert [job["name"] for job in jobs] == ["onboarding-tick"]
+    assert setup.build_config(spec)["onboarding"]["enabled"] is False
 
 
 def test_weekly_reminders_delivers_to_the_home_channel_and_posts_by_script():
@@ -166,6 +223,62 @@ def test_write_profile_roundtrips_config(tmp_path):
     assert Path(written["soul"]).read_text().count("Ace") >= 1
     cron = json.loads(Path(written["cronjobs"]).read_text())
     assert any(j["skill"] == "daily-digest" for j in cron)
+
+
+def test_synthetic_onboarding_only_fixture_generates_consistent_policy(tmp_path):
+    fixture_dir = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "synthetic-agency"
+    fixture = fixture_dir / "brand.json"
+    spec = json.loads(fixture.read_text(encoding="utf-8"))
+    data_dir = tmp_path / "ace"
+    data_dir.mkdir()
+    (data_dir / "knowledge.yaml").write_text(
+        (fixture_dir / "knowledge.yaml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    written = setup.write_profile(spec, tmp_path)
+
+    import yaml
+
+    yaml_ace = yaml.safe_load(Path(written["config"]).read_text())["ace"]
+    json_ace = json.loads(Path(written["brand_json"]).read_text())
+    assert yaml_ace["features"] == {name: False for name in setup.FEATURE_NAMES}
+    assert json_ace["features"] == yaml_ace["features"]
+    assert yaml_ace["onboarding"]["enabled"] is True
+    assert yaml_ace["onboarding"]["guidance"]["how_to_reach_team"] == (
+        "Use #synthetic-help to contact the Synthetic Agency Team."
+    )
+
+
+def test_onboarding_only_activation_requires_complete_bounded_guidance(tmp_path):
+    spec = make_spec(features={name: False for name in setup.FEATURE_NAMES})
+    spec["onboarding"] = {"enabled": True}
+
+    with pytest.raises(ValueError, match="onboarding guidance"):
+        setup.write_profile(spec, tmp_path)
+
+
+def test_setup_compiles_only_onboarding_guidance_into_profile_artifacts(tmp_path):
+    import yaml
+
+    knowledge = {
+        "brand": {"name": "Synthetic Agency"},
+        "onboarding": {
+            "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
+            "getting_started": ["Introduce yourself in #introductions."],
+            "how_to_reach_team": "Message the Agency Team in #help-desk.",
+        },
+        "faq": [{"q": "Secret pricing?", "a": "Not for onboarding."}],
+    }
+    data_dir = tmp_path / "ace"
+    data_dir.mkdir()
+    (data_dir / "knowledge.yaml").write_text(yaml.safe_dump(knowledge), encoding="utf-8")
+
+    written = setup.write_profile(make_spec(), tmp_path)
+    yaml_ace = yaml.safe_load(Path(written["config"]).read_text())["ace"]
+    json_ace = json.loads(Path(written["brand_json"]).read_text())
+    expected = knowledge["onboarding"]
+    assert yaml_ace["onboarding"]["guidance"] == expected
+    assert json_ace["onboarding"]["guidance"] == expected
+    assert "faq" not in json.dumps(json_ace["onboarding"]["guidance"])
 
 
 def test_write_profile_sets_ace_data_dir_in_env(tmp_path):

@@ -20,9 +20,41 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 SIDECAR = "brand.json"
+
+FEATURE_NAMES = (
+    "general_qa",
+    "moderation",
+    "announcements",
+    "engagement",
+    "reporting",
+)
+DEFAULT_FEATURES = {name: True for name in FEATURE_NAMES}
+
+
+class PolicyError(ValueError):
+    """The profile contains an explicit feature policy that cannot be trusted."""
+
+
+def resolve_features(ace_config: dict) -> dict[str, bool]:
+    """Return the effective feature map. Missing legacy settings remain enabled."""
+    if not isinstance(ace_config, dict):
+        raise PolicyError("ace config must be an object")
+    if "features" not in ace_config:
+        return dict(DEFAULT_FEATURES)
+    explicit = ace_config["features"]
+    if not isinstance(explicit, dict):
+        raise PolicyError("ace.features must be an object")
+    unknown = sorted(set(explicit) - set(FEATURE_NAMES))
+    if unknown:
+        raise PolicyError(f"unknown ace.features names: {unknown}")
+    invalid = sorted(name for name, value in explicit.items() if type(value) is not bool)
+    if invalid:
+        raise PolicyError(f"ace.features values must be booleans: {invalid}")
+    return {**DEFAULT_FEATURES, **explicit}
 
 
 def profile_dir() -> Path:
@@ -45,6 +77,84 @@ def config(profile: Path | None = None) -> dict:
     except (OSError, ValueError):
         pass
     return _from_yaml(profile)
+
+
+def load_policy(profile: Path | None = None) -> dict[str, bool]:
+    """Load policy without treating malformed explicit settings as legacy defaults.
+
+    A missing sidecar is allowed for profiles created before feature settings existed.
+    A present but unreadable sidecar is a configuration error and fails closed.
+    """
+    profile = profile or profile_dir()
+    path = sidecar_path(profile)
+    if path.exists():
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise PolicyError(f"cannot read {SIDECAR}: {exc}") from exc
+        return resolve_features(value)
+
+    cfg_path = profile / "config.yaml"
+    if not cfg_path.exists():
+        return dict(DEFAULT_FEATURES)
+    config_text = cfg_path.read_text(encoding="utf-8")
+    try:
+        import yaml
+    except ImportError:
+        # Existing sandbox profiles without a sidecar predate feature policy only when
+        # config.yaml also has no explicit policy. A missing deployment artifact must not
+        # turn a restricted profile back on.
+        if _config_declares_ace_features(config_text):
+            raise PolicyError(
+                "config.yaml declares ace.features but brand.json is missing and PyYAML "
+                "is unavailable"
+            )
+        return dict(DEFAULT_FEATURES)
+    try:
+        root = yaml.safe_load(config_text) or {}
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise PolicyError(f"cannot read config.yaml feature policy: {exc}") from exc
+    if not isinstance(root, dict):
+        raise PolicyError("config.yaml root must be an object")
+    ace = root.get("ace") or {}
+    return resolve_features(ace)
+
+
+def feature_enabled(name: str, profile: Path | None = None) -> bool:
+    if name not in FEATURE_NAMES:
+        raise PolicyError(f"unknown feature name: {name}")
+    return load_policy(profile)[name]
+
+
+def _config_declares_ace_features(text: str) -> bool:
+    """Detect a direct ``ace.features`` key without parsing YAML."""
+    lines = text.splitlines()
+    ace_line = None
+    for index, raw in enumerate(lines):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if raw == raw.lstrip() and re.match(r"^ace\s*:", stripped):
+            if re.search(r"^ace\s*:\s*\{.*\bfeatures\s*:", stripped):
+                return True
+            ace_line = index
+            break
+    if ace_line is None:
+        return False
+
+    child_indent = None
+    for raw in lines[ace_line + 1:]:
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        if indent == 0:
+            break
+        if child_indent is None:
+            child_indent = indent
+        if indent == child_indent and re.match(r"^features\s*:", stripped):
+            return True
+    return False
 
 
 def _from_yaml(profile: Path) -> dict:

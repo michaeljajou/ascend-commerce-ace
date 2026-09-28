@@ -10,6 +10,10 @@ license: MIT
 
 Ad-hoc announcements the team triggers on demand.
 
+## Feature policy
+Use this skill only when `ace.features.announcements` is enabled. Operator authorization does not
+override the profile policy. When disabled, do not draft, schedule, or post an announcement.
+
 ## When to Use
 On an operator command, e.g. `/ace announce #channel <message>` (gated to operators via
 `admin-commands`).

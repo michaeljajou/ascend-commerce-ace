@@ -15,6 +15,12 @@ Route anything Ace shouldn't answer to the brand's Slack channel — without lea
 hanging. Used for: not-grounded logistics questions, creative-strategist requests, deal
 renegotiation, and escalated complaints.
 
+## Feature policy
+General support escalation is part of `ace.features.general_qa`. When that feature is disabled,
+do not acknowledge, log, or send support questions to Slack. Active onboarding may use only the
+specific escalation behavior defined by `run-onboarding`. Moderation may notify the team only when
+`ace.features.moderation` is enabled.
+
 ## When to Use
 - `answer-from-kb` found nothing grounded (`not_grounded`).
 - `classify-question` returned ROUTE (`creative-strategist`).
@@ -27,7 +33,7 @@ renegotiation, and escalated complaints.
 2. **Post to the team Slack channel** — all brands share it, and the script automatically
    prefixes your message with this brand's tag (`[<brand>]`), so just write the summary:
    ```
-   python3 ${HERMES_SKILL_DIR}/../_lib/slack_cli.py post --text "<summary>"
+   python3 ${HERMES_SKILL_DIR}/../_lib/slack_cli.py post --purpose support --text "<summary>"
    ```
    (In a sweep run, use the absolute path the payload gives you as `scripts.slack`.)
    Write plain text with simple bullets. The script translates formatting for Slack itself
@@ -46,6 +52,8 @@ renegotiation, and escalated complaints.
      --channel "<channel>" --handle "<creator>" --question "<q>"
    ```
    (Use `--status routed` instead when the reason is `creative-strategist`.)
+
+   A moderation notification uses `--purpose moderation` instead of `--purpose support`.
 
 ## Pitfalls
 - Always acknowledge the creator first; an escalation the creator can't see feels like being ignored.

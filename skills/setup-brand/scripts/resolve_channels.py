@@ -44,6 +44,7 @@ from setup import (  # noqa: E402
     ensure_env,
     load_channel_directory,
     resolve_cron_deliver,
+    _write_brand_sidecar,
     upsert_channel_directory,
 )
 
@@ -289,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
                         and j["deliver"][len("discord:"):].isdigit()}
 
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    _write_brand_sidecar(profile, config_path)
     print(json.dumps({
         "gateway": "mention-only (free_response_channels cleared; sweep cron covers the rest)",
         "swept_channels": {n: name_to_id[n] for n in sorted(free_response_names) if n in name_to_id},

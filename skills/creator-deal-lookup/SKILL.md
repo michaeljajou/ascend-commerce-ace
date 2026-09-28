@@ -15,6 +15,10 @@ Personalized deal facts for paid-collab and ambassador channels. This is the dea
 of `get-knowledge`: it grounds answers about *one* creator's terms, and a miss means escalate — never
 invent terms, rates, or dates.
 
+## Feature policy
+Use this skill only when `ace.features.general_qa` is enabled. When disabled, do not read deal data,
+answer, log, or escalate. An explicit lookup request cannot override the profile policy.
+
 ## When to Use
 - In a paid-collab (1:1) channel or the ambassador channel, when a creator asks about their own
   deal: payment status/timing, deliverables due, schedule, deal terms.

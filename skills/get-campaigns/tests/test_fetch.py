@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import fetch  # noqa: E402
 
@@ -17,6 +19,20 @@ def make_profile(tmp_path, channels=("campaigns", "challenges", "announcements")
     }), encoding="utf-8")
     (tmp_path / ".env").write_text("DISCORD_BOT_TOKEN=tok123\n", encoding="utf-8")
     return tmp_path
+
+
+def disable_campaign_consumers(profile):
+    ace_dir = profile / "ace"
+    ace_dir.mkdir(exist_ok=True)
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": {
+            "general_qa": False,
+            "moderation": False,
+            "announcements": False,
+            "engagement": False,
+            "reporting": False,
+        }
+    }), encoding="utf-8")
 
 
 def msg(content, author="team", ts="2026-07-01T00:00:00Z", **extra):
@@ -66,6 +82,35 @@ def test_main_fetches_per_channel(tmp_path, monkeypatch, capsys):
     assert out["channels"]["challenges"]["active"]["content"] == "active in 101"
     assert out["missing_channels"] == []
     assert calls["100"] == ("tok123", 10)          # token read from profile .env; default limit
+
+
+def test_main_refuses_campaign_lookup_when_all_consuming_features_are_disabled(
+        tmp_path, monkeypatch, capsys):
+    make_profile(tmp_path)
+    disable_campaign_consumers(tmp_path)
+    monkeypatch.setattr(fetch, "bot_token", lambda _profile: pytest.fail("read Discord token"))
+
+    assert fetch.main(["--profile-dir", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out) == {"disabled": "general_qa"}
+
+
+def test_campaign_lookup_purpose_uses_only_its_feature(tmp_path, monkeypatch, capsys):
+    make_profile(tmp_path)
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir(exist_ok=True)
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": {"general_qa": False, "announcements": True}
+    }), encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(fetch, "fetch_messages",
+                        lambda *_args: calls.append(True) or [msg("campaign")])
+
+    assert fetch.main(["--profile-dir", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out) == {"disabled": "general_qa"}
+    assert calls == []
+
+    assert fetch.main(["--profile-dir", str(tmp_path), "--purpose", "announcements"]) == 0
+    assert calls
 
 
 def test_decorated_live_names_resolve(tmp_path, monkeypatch, capsys):

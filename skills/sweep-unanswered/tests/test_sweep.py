@@ -208,6 +208,20 @@ def test_unwired_profile_is_silent_not_fatal(tmp_path, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out.strip()) == {"wakeAgent": False}
 
 
+def test_disabled_general_qa_exits_before_discord_reads(tmp_path, monkeypatch, capsys):
+    import yaml
+
+    make_profile(tmp_path)
+    cfg = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    cfg["ace"]["features"] = {"general_qa": False}
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    monkeypatch.setattr(sweep, "_get",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("Discord read")))
+    assert sweep.main(["--profile-dir", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out.strip()) == {"wakeAgent": False}
+    assert not (tmp_path / "ace" / "sweep_state.json").exists()
+
+
 def test_payload_names_the_scripts_by_absolute_path(tmp_path, monkeypatch, capsys):
     """The woken agent guessed `<bundle>/_lib/log_cli.py` (no `skills/`), searched, found
     nothing, and declared the Slack tooling "not present in this deployment" — the tesh.oneal

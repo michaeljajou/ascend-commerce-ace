@@ -75,6 +75,43 @@ def test_answer_completes_a_full_turn_without_pyyaml(profile, no_pyyaml, monkeyp
     conn.close()
 
 
+def test_completion_guidance_comes_from_the_json_sidecar_without_pyyaml(
+    profile, no_pyyaml, monkeypatch
+):
+    brand.write_sidecar(profile, {"onboarding": {"guidance": {
+        "channels": [{"channel": "#start-here", "purpose": "Begin here"}],
+        "getting_started": ["Introduce yourself."],
+        "how_to_reach_team": "Use #help-desk.",
+    }}})
+    assert onboarding.completion_guidance()["how_to_reach_team"] == "Use #help-desk."
+
+
+def test_restricted_completion_fails_before_side_effects_without_sidecar(
+        profile, no_pyyaml, monkeypatch):
+    (profile / "config.yaml").write_text(
+        "ace:\n"
+        "  features:\n"
+        "    general_qa: false\n"
+        "  onboarding:\n"
+        "    enabled: true\n"
+        "    guidance:\n"
+        "      channels: [start-here]\n"
+        "      getting_started: [introduce-yourself]\n"
+        "      how_to_reach_team: help-desk\n",
+        encoding="utf-8",
+    )
+    conn = store.connect(str(profile / "ace" / "ace.db"))
+    onboarding.start(conn, "@restricted", now=100.0)
+    onboarding.set_fields(conn, "@restricted", tiktok="restricted.tt")
+    monkeypatch.setattr(assign_role, "assign",
+                        lambda *_args, **_kwargs: pytest.fail("role assignment ran"))
+
+    with pytest.raises(brand.PolicyError, match="brand.json"):
+        onboarding.complete(conn, "@restricted")
+    assert store.get_creator(conn, "@restricted").role is None
+    conn.close()
+
+
 def test_slack_channel_resolves_without_pyyaml(profile, no_pyyaml, monkeypatch):
     brand.write_sidecar(profile, {"slack_channel": "#ace-escalations"})
     assert slack_cli.load_ace_config(profile)["slack_channel"] == "#ace-escalations"

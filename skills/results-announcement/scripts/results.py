@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
 
-from _lib import growi  # noqa: E402
+from _lib import brand, growi  # noqa: E402
 
 
 def render(results: "growi.CampaignResults") -> str:
@@ -47,6 +47,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base-url", required=True)
     ap.add_argument("--project", required=True)
     args = ap.parse_args(argv)
+
+    try:
+        if not brand.feature_enabled("announcements"):
+            print(json.dumps({"disabled": "announcements"}))
+            return 0
+    except brand.PolicyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     results = growi.fetch_results(args.base_url, args.project)
     print(json.dumps({"text": render(results)}))

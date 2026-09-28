@@ -40,8 +40,17 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # skills
+from _lib import brand  # noqa: E402
+
 DISCORD_API = "https://discord.com/api/v10"
 DEFAULT_CHANNELS = "campaigns,challenges,announcements"
+PURPOSE_FEATURE = {
+    "support": "general_qa",
+    "announcements": "announcements",
+    "engagement": "engagement",
+    "reporting": "reporting",
+}
 # Mixed feeds: many kinds of posts, so the newest one is not "the active campaign".
 MIXED_CHANNELS = {"announcements"}
 # Embed types Discord generates itself for links in the text (site previews) — never
@@ -190,10 +199,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--channels", default=DEFAULT_CHANNELS,
                     help=f"comma-separated channel names (default: {DEFAULT_CHANNELS})")
     ap.add_argument("--limit", type=int, default=10, help="messages to fetch per channel")
+    ap.add_argument("--purpose", choices=PURPOSE_FEATURE, default="support")
     args = ap.parse_args(argv)
 
     profile = Path(args.profile_dir)
     names = [n.strip().lstrip("#") for n in args.channels.split(",") if n.strip()]
+
+    try:
+        policy = brand.load_policy(profile)
+    except brand.PolicyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    feature = PURPOSE_FEATURE[args.purpose]
+    if not policy[feature]:
+        print(json.dumps({"disabled": feature}))
+        return 0
 
     token = bot_token(profile)
     if not token:

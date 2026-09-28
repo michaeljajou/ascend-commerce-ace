@@ -47,6 +47,23 @@ MEMBER_CACHE_HOURS = 24
 FETCH_LIMIT = 100
 
 SILENT = json.dumps({"wakeAgent": False})
+FEATURE_NAMES = {"general_qa", "moderation", "announcements", "engagement", "reporting"}
+
+
+def feature_enabled(ace_config: dict, name: str) -> bool:
+    """Self-contained policy check for the profile-copied cron script."""
+    if "features" not in ace_config:
+        return True
+    features = ace_config["features"]
+    if not isinstance(features, dict):
+        raise ValueError("ace.features must be an object")
+    unknown = sorted(set(features) - FEATURE_NAMES)
+    invalid = sorted(key for key, value in features.items() if type(value) is not bool)
+    if unknown:
+        raise ValueError(f"unknown ace.features names: {unknown}")
+    if invalid:
+        raise ValueError(f"ace.features values must be booleans: {invalid}")
+    return features.get(name, True)
 
 
 # ── Discord REST (token-efficient: plain GETs, no LLM anywhere) ────────────────
@@ -222,7 +239,16 @@ def main(argv: list[str] | None = None) -> int:
     import yaml
 
     config = yaml.safe_load((profile / "config.yaml").read_text(encoding="utf-8")) or {}
-    ace_discord = ((config.get("ace") or {}).get("discord")) or {}
+    ace = config.get("ace") or {}
+    try:
+        if not feature_enabled(ace, "general_qa"):
+            print(SILENT)
+            return 0
+    except ValueError as exc:
+        print(SILENT)
+        print(f"sweep: invalid feature policy: {exc}", file=sys.stderr)
+        return 1
+    ace_discord = (ace.get("discord")) or {}
     channel_names = (ace_discord.get("scoping") or {}).get("free_response") or []
     guild_id = str(ace_discord.get("guild_id") or "")
     team_role = ace_discord.get("team_role")  # name or numeric id

@@ -11,6 +11,10 @@ license: MIT
 For MONITOR_ONLY channels (default: `success-stories`). Ace **reads** for sentiment but **never
 posts** in the channel. Anything noteworthy goes to the team in Slack, not the public channel.
 
+## Feature policy
+Use this skill only when `ace.features.moderation` is enabled. When it is disabled, do not monitor,
+classify, react, reply, or escalate content from MONITOR_ONLY channels.
+
 > Wiring note: how Hermes lets a profile *read but not reply* in a channel is a Phase 0 spike item
 > (channel scoping vs a read-only hook). This skill encodes the behavior regardless of mechanism.
 
