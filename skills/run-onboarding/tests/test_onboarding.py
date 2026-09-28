@@ -605,6 +605,7 @@ def test_completion_returns_bounded_profile_guidance_without_reading_yaml(conn, 
     out = onboarding.answer(conn, "@ava", "skip")
 
     assert out["next_step"] == "guidance"
+    assert out["guidance_mode"] == "compiled"
     assert out["guidance"]["channels"][0]["channel"] == "#start-here"
     assert out["guidance"]["how_to_reach_team"].startswith("Ask the Agency Team")
 

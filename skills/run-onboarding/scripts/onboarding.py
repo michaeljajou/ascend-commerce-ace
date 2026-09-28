@@ -245,8 +245,8 @@ def next_field(row: dict) -> str | None:
     return None
 
 
-def completion_guidance(profile: Path | None = None) -> dict:
-    """The bounded onboarding section compiled into brand.json by setup-brand."""
+def completion_guidance_context(profile: Path | None = None) -> dict:
+    """Select compiled guidance or the compatible full-feature lookup path."""
     profile = profile or brand.profile_dir()
     policy = brand.load_policy(profile)
     guidance = ((brand.config(profile).get("onboarding") or {}).get("guidance")) or {}
@@ -254,13 +254,19 @@ def completion_guidance(profile: Path | None = None) -> dict:
         guidance = {}
     allowed = ("channels", "getting_started", "how_to_reach_team")
     bounded = {key: guidance[key] for key in allowed if key in guidance}
+    missing = [key for key in allowed if not bounded.get(key)]
+    if not missing:
+        return {"guidance": bounded, "guidance_mode": "compiled"}
     if not policy["general_qa"]:
-        missing = [key for key in allowed if not bounded.get(key)]
-        if missing:
-            raise brand.PolicyError(
-                "restricted onboarding guidance is unavailable; missing: " + ", ".join(missing)
-            )
-    return bounded
+        raise brand.PolicyError(
+            "restricted onboarding guidance is unavailable; missing: " + ", ".join(missing)
+        )
+    return {"guidance": {}, "guidance_mode": "legacy_full_feature"}
+
+
+def completion_guidance(profile: Path | None = None) -> dict:
+    """The bounded onboarding section compiled into brand.json by setup-brand."""
+    return completion_guidance_context(profile)["guidance"]
 
 
 def _completed(row: dict) -> bool:
@@ -288,7 +294,7 @@ def conversation_context(conn, handle: str) -> dict:
         "outside_scope": redirect,
     }
     if _completed(row):
-        out["guidance"] = completion_guidance()
+        out.update(completion_guidance_context())
     return out
 
 
@@ -361,6 +367,7 @@ def answer(conn, handle: str, text: str | None = None, now: float | None = None)
         start(conn, handle, now=now)
         row = store.get_onboarding(conn, handle) or {}
     if _completed(row):
+        guidance_context = completion_guidance_context()
         return {
             "ok": True,
             "handle": handle,
@@ -369,7 +376,7 @@ def answer(conn, handle: str, text: str | None = None, now: float | None = None)
             "already_complete": True,
             "next_step": "redirect",
             "redirect": configured_redirect(),
-            "guidance": completion_guidance(),
+            **guidance_context,
         }
 
     source = "argument"
@@ -408,9 +415,10 @@ def answer(conn, handle: str, text: str | None = None, now: float | None = None)
 
 def _finish(conn, handle: str, now: float | None) -> dict:
     """Everything asked — assign roles and hand the details to the team."""
-    guidance = completion_guidance()
+    guidance_context = completion_guidance_context()
+    guidance = guidance_context["guidance"]
     done = complete(conn, handle, now=now, _guidance=guidance)
-    return {**done, "ask": None, "guidance": guidance,
+    return {**done, "ask": None, **guidance_context,
             "next_step": "guidance" if done.get("ok") else "hand off to the team"}
 
 

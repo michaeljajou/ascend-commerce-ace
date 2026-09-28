@@ -8,6 +8,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import setup  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "run-onboarding" / "scripts"))
+import onboarding  # noqa: E402
+
 
 def make_spec(**overrides):
     spec = {
@@ -111,29 +114,59 @@ def test_merge_config_preserves_hermes_keys(tmp_path):
     assert data["model"] == "anthropic/claude-sonnet-4-6"           # answer model at top-level (spec had one)
 
 
-def test_merge_config_drops_foreign_onboarding_channel_id(tmp_path):
+def test_merge_config_drops_all_foreign_onboarding_channel_references(tmp_path):
     """Profiles are created by cloning another brand (SOP Step 2), so the pre-setup
-    config carries the SOURCE brand's onboarding channel_id — live state for the WRONG
-    guild. Same-guild re-runs keep it (resolve_channels wrote it); clones drop it."""
+    config carries the source brand's onboarding references into the wrong guild."""
     import yaml
 
     cfg = tmp_path / "config.yaml"
-    cfg.write_text(yaml.safe_dump({"ace": {
-        "discord": {"guild_id": "other-guild"},
-        "onboarding": {"channel_id": "15237"},
-    }}), encoding="utf-8")
+    cfg.write_text(yaml.safe_dump({
+        "ace": {
+            "discord": {"guild_id": "other-guild"},
+            "onboarding": {"channel_id": "15237"},
+        },
+        "discord": {
+            "free_response_channels": "15237,777",
+            "channel_skill_bindings": [
+                {"id": "15237", "skills": ["run-onboarding"]},
+                {"id": "777", "skills": ["unrelated-skill"]},
+            ],
+        },
+    }), encoding="utf-8")
     setup.merge_config(cfg, make_spec())                    # make_spec guild differs
     data = yaml.safe_load(cfg.read_text())
-    assert "channel_id" not in data["ace"]["onboarding"]    # foreign id dropped
+    assert "channel_id" not in data["ace"]["onboarding"]
+    assert data["discord"]["free_response_channels"] == "777"
+    assert data["discord"]["channel_skill_bindings"] == [
+        {"id": "777", "skills": ["unrelated-skill"]}
+    ]
+
+
+def test_merge_config_preserves_same_guild_onboarding_channel_references(tmp_path):
+    import yaml
 
     same = make_spec()
-    cfg.write_text(yaml.safe_dump({"ace": {
-        "discord": {"guild_id": str(same["discord"]["guild_id"])},
-        "onboarding": {"channel_id": "15237"},
-    }}), encoding="utf-8")
+    cfg = tmp_path / "config.yaml"
+    root_discord = {
+        "free_response_channels": "15237,777",
+        "channel_skill_bindings": [
+            {"id": "15237", "skills": ["run-onboarding"]},
+            {"id": "777", "skills": ["unrelated-skill"]},
+        ],
+    }
+    cfg.write_text(yaml.safe_dump({
+        "ace": {
+            "discord": {"guild_id": str(same["discord"]["guild_id"])},
+            "onboarding": {"channel_id": "15237"},
+        },
+        "discord": root_discord,
+    }), encoding="utf-8")
+
     setup.merge_config(cfg, same)
+
     data = yaml.safe_load(cfg.read_text())
-    assert data["ace"]["onboarding"]["channel_id"] == "15237"   # same guild: preserved
+    assert data["ace"]["onboarding"]["channel_id"] == "15237"
+    assert data["discord"] == root_discord
 
 
 def test_merge_config_sets_quiet_display_defaults(tmp_path):
@@ -313,6 +346,35 @@ def test_synthetic_onboarding_only_active_flow_uses_a_test_local_copy(tmp_path):
     assert stored["onboarding"]["enabled"] is False
     generated = yaml.safe_load(Path(written["config"]).read_text())
     assert generated["ace"]["onboarding"]["enabled"] is True
+
+
+def test_legacy_full_feature_profile_without_bounded_guidance_keeps_prior_guidance_path(
+    tmp_path, monkeypatch
+):
+    fixture = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "pilot-brand"
+    data_dir = tmp_path / "ace"
+    data_dir.mkdir()
+    (data_dir / "knowledge.yaml").write_text(
+        (fixture / "knowledge.yaml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    spec = make_spec(onboarding={"enabled": True})
+
+    written = setup.write_profile(spec, tmp_path)
+    monkeypatch.setenv("ACE_DATA_DIR", str(data_dir))
+
+    ace_config = json.loads(Path(written["brand_json"]).read_text(encoding="utf-8"))
+    assert "guidance" not in ace_config["onboarding"]
+    Path(written["brand_json"]).write_text(
+        json.dumps({"onboarding": {"enabled": True}}), encoding="utf-8"
+    )
+    assert onboarding.completion_guidance_context(tmp_path) == {
+        "guidance": {},
+        "guidance_mode": "legacy_full_feature",
+    }
+    skill = (Path(__file__).resolve().parents[2] / "run-onboarding" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "legacy_full_feature" in skill
 
 
 def test_onboarding_only_activation_requires_complete_bounded_guidance(tmp_path):

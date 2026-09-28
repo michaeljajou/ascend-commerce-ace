@@ -649,6 +649,8 @@ def merge_config(config_path: str | Path, spec: dict) -> dict:
         existing["ace"]["onboarding"]["guidance"] = guidance
     if prior_onboarding_channel and prior_guild == str(spec["discord"]["guild_id"]):
         existing["ace"]["onboarding"]["channel_id"] = prior_onboarding_channel
+    elif prior_onboarding_channel:
+        _drop_foreign_onboarding_gateway_references(existing, prior_onboarding_channel)
     # Resolve the provider BEFORE the model key is rewritten below — that rewrite is where
     # the routing info would otherwise disappear.
     provider_id = _provider_id(existing)
@@ -664,6 +666,43 @@ def merge_config(config_path: str | Path, spec: dict) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(existing, sort_keys=False), encoding="utf-8")
     return existing["ace"]
+
+
+def _drop_foreign_onboarding_gateway_references(config: dict, channel_id: str) -> None:
+    """Remove one cloned onboarding channel from Hermes' root gateway config."""
+    discord = config.get("discord")
+    if not isinstance(discord, dict):
+        return
+
+    free_response = discord.get("free_response_channels")
+    if isinstance(free_response, str):
+        channels = [value.strip() for value in free_response.split(",") if value.strip()]
+        discord["free_response_channels"] = ",".join(
+            value for value in channels if value != str(channel_id)
+        )
+    elif isinstance(free_response, list):
+        discord["free_response_channels"] = [
+            value for value in free_response if str(value) != str(channel_id)
+        ]
+    elif free_response is not None and str(free_response) == str(channel_id):
+        discord["free_response_channels"] = ""
+
+    bindings = discord.get("channel_skill_bindings")
+    if not isinstance(bindings, list):
+        return
+    kept = []
+    for binding in bindings:
+        if not isinstance(binding, dict) or str(binding.get("id")) != str(channel_id):
+            kept.append(binding)
+            continue
+        skills = binding.get("skills")
+        if not isinstance(skills, list) or "run-onboarding" not in skills:
+            kept.append(binding)
+            continue
+        remaining = [skill for skill in skills if skill != "run-onboarding"]
+        if remaining:
+            kept.append({**binding, "skills": remaining})
+    discord["channel_skill_bindings"] = kept
 
 
 def extract_channel_directory(soul_text: str) -> str | None:
