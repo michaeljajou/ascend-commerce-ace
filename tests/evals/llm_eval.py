@@ -28,6 +28,9 @@ SKILLS_ROOT = REPO_ROOT / "skills"
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 DEFAULT_KNOWLEDGE = REPO_ROOT / "tests" / "fixtures" / "pilot-brand" / "knowledge.yaml"
 ONBOARDING_ONLY_SPEC = REPO_ROOT / "tests" / "fixtures" / "synthetic-agency" / "brand.json"
+ONBOARDING_ONLY_KNOWLEDGE = (
+    REPO_ROOT / "tests" / "fixtures" / "synthetic-agency" / "knowledge.yaml"
+)
 
 MIN_PASS_RATE = 0.9
 
@@ -165,7 +168,13 @@ def _onboarding_only_system(skills_root: Path) -> str:
     import setup as setup_brand
 
     spec = json.loads(ONBOARDING_ONLY_SPEC.read_text(encoding="utf-8"))
-    soul = setup_brand.render_soul(spec)
+    spec["onboarding"] = dict(spec["onboarding"])
+    spec["onboarding"]["enabled"] = True
+    ace_config = setup_brand.build_config(spec)
+    ace_config["onboarding"]["guidance"] = knowledge.load_knowledge(
+        ONBOARDING_ONLY_KNOWLEDGE
+    )["onboarding"]
+    soul = setup_brand.render_soul(spec, ace_config=ace_config)
     return (
         soul
         + "\n\n--- BOUND SKILL ---\n\n"
@@ -174,7 +183,9 @@ def _onboarding_only_system(skills_root: Path) -> str:
         "The action must be onboard for an answer to the active field, clarify only for a "
         "question about that field, redirect for a DM, mention, or completed thread outside "
         "onboarding, and silent for an ordinary public message. Disabled skills stay disabled.\n"
-        'Respond ONLY with JSON: {"action": "onboard" | "clarify" | "redirect" | "silent"}'
+        'For redirect, copy the exact configured reply from SOUL.md into reply. '
+        'Respond ONLY with JSON: {"action": "onboard" | "clarify" | "redirect" | "silent", '
+        '"reply": "<exact redirect text, or empty>"}'
     )
 
 
@@ -292,11 +303,19 @@ def run_onboarding_only(
                 {"role": "user", "content": user},
             ]))
             got = out.get("action", "")
+            reply = out.get("reply", "")
         except ValueError as exc:
             got = f"parse_error:{exc}"
-        passed = got == expected
+            reply = ""
+        expected_reply = c.get("expect_reply")
+        action_matches = got == expected
+        reply_matches = expected_reply is None or reply == expected_reply
+        passed = action_matches and reply_matches
+        detail = ""
+        if action_matches and not reply_matches:
+            detail = f"reply mismatch: expected {expected_reply!r}, got {reply!r}"
         suite.results.append(CaseResult(
-            c["id"], passed, bool(c.get("critical")) and not passed, expected, got
+            c["id"], passed, bool(c.get("critical")) and not passed, expected, got, detail
         ))
     return suite
 

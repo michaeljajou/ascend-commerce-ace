@@ -18,7 +18,7 @@
     "reporting": false
   },
   "onboarding": {
-    "enabled": true,
+    "enabled": false,
     "staff_role": "Synthetic Agency Team",
     "creator_roles": [
       "Synthetic Creator"

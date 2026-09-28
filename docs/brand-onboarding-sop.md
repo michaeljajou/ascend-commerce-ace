@@ -412,6 +412,12 @@ it matches the generated `cronjobs.yaml`; at go-live, force one enabled job and 
 its expected no-op or output. For onboarding-only, verify that no sweep, digest,
 engagement, or announcement job is registered.
 
+The deterministic fixture `tests/fixtures/synthetic-agency/registered-cronjobs.json` and
+`test_registered_job_reconciliation_pauses_obsolete_ace_jobs_and_preserves_unrelated` cover the
+same comparison before any live command is run. The reconciliation plan keeps registered Ace
+jobs still present in `cronjobs.yaml`, pauses obsolete Ace job IDs, creates missing desired Ace
+job names, and preserves unrelated job IDs. Apply that plan only to the selected profile.
+
 **Live run:** ✅ 2026-08-04 I Am Joy — five jobs registered as uid 10000 +
 HOME=/opt/data, paused within the same minute (sweep's first fire was 2 minutes out),
 `cron list --all` confirms all five paused. Resume happens at Step 9.

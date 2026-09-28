@@ -550,6 +550,44 @@ def test_post_completion_message_never_repeats_completion_side_effects(conn, mon
     assert out["ask"] is None
 
 
+def test_completed_creator_gets_the_exact_configured_redirect(conn, monkeypatch):
+    monkeypatch.setattr(brand, "config", lambda profile=None: {
+        "onboarding": {"guidance": {
+            "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
+            "getting_started": ["Introduce yourself."],
+            "how_to_reach_team": "Use #help-desk to contact the Agency Team.",
+        }}
+    })
+    monkeypatch.setattr(
+        brand,
+        "load_policy",
+        lambda profile=None: {name: False for name in brand.FEATURE_NAMES},
+    )
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.set_fields(conn, "@ava", tiktok="ava.tt")
+    onboarding.complete(conn, "@ava", now=200.0)
+
+    out = onboarding.answer(conn, "@ava", "What campaigns are active?", now=300.0)
+
+    assert out["redirect"] == (
+        "I can help with onboarding here. Use #help-desk to contact the Agency Team."
+    )
+
+
+def test_unknown_creator_context_exposes_the_exact_configured_redirect(conn, monkeypatch):
+    monkeypatch.setattr(brand, "config", lambda profile=None: {
+        "onboarding": {"guidance": {
+            "how_to_reach_team": "Use #help-desk to contact the Agency Team."
+        }}
+    })
+
+    context = onboarding.conversation_context(conn, "@unknown")
+
+    assert context["outside_scope"] == (
+        "I can help with onboarding here. Use #help-desk to contact the Agency Team."
+    )
+
+
 def test_completion_returns_bounded_profile_guidance_without_reading_yaml(conn, tmp_path, monkeypatch):
     monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "ace"))
     brand.write_sidecar(tmp_path, {

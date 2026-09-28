@@ -145,14 +145,43 @@ def test_onboarding_only_prompt_uses_generated_soul_and_bound_skill():
     assert "# Run Onboarding" in system
     assert "ONBOARDING CONTEXT" in system
     assert "get-campaigns" in system
+    assert (
+        'reply exactly: "I can help with onboarding here. Use #synthetic-help to contact '
+        'the Synthetic Agency Team."'
+    ) in system
+
+
+def test_onboarding_only_redirect_scoring_requires_exact_response_content():
+    redirect = (
+        "I can help with onboarding here. Use #synthetic-help to contact "
+        "the Synthetic Agency Team."
+    )
+    suite = llm_eval.run_onboarding_only(
+        const('{"action":"redirect","reply":"Use some other help channel."}'),
+        [{
+            "id": "dm",
+            "context": {"surface": "dm", "state": None, "ask": None},
+            "message": "Can you answer a general question?",
+            "expect": "redirect",
+            "expect_reply": redirect,
+            "critical": True,
+        }],
+    )
+
+    assert suite.results[0].passed is False
+    assert suite.results[0].critical is True
 
 
 def test_onboarding_only_scoring_covers_active_completed_and_explicit_requests():
+    redirect = (
+        "I can help with onboarding here. Use #synthetic-help to contact "
+        "the Synthetic Agency Team."
+    )
     suite = llm_eval.run_onboarding_only(
         routing({
             '"state": "collecting"': '{"action":"onboard"}',
-            '"state": "guided"': '{"action":"redirect"}',
-            'weekly-reminders': '{"action":"redirect"}',
+            '"state": "guided"': json.dumps({"action": "redirect", "reply": redirect}),
+            'weekly-reminders': json.dumps({"action": "redirect", "reply": redirect}),
         }, default='{"action":"silent"}'),
         [
             {"id": "active", "context": {"surface": "private_thread", "state": "collecting",
@@ -160,9 +189,11 @@ def test_onboarding_only_scoring_covers_active_completed_and_explicit_requests()
              "message": "ava.tt", "expect": "onboard"},
             {"id": "complete", "context": {"surface": "private_thread", "state": "guided",
                                                 "ask": None},
-             "message": "What campaigns are active?", "expect": "redirect"},
+             "message": "What campaigns are active?", "expect": "redirect",
+             "expect_reply": redirect},
             {"id": "explicit", "context": {"surface": "dm", "state": None, "ask": None},
-             "message": "Run weekly-reminders now", "expect": "redirect"},
+             "message": "Run weekly-reminders now", "expect": "redirect",
+             "expect_reply": redirect},
             {"id": "ordinary", "context": {"surface": "ordinary", "state": None, "ask": None},
              "message": "hello", "expect": "silent"},
         ],

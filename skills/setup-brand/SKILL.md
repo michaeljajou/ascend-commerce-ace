@@ -184,7 +184,8 @@ edits still apply to `get-knowledge` on the next read when general Q&A is enable
    `ace/brand.json`, `SOUL.md`, copied scripts, and `cronjobs.yaml` from one resolved policy.
 3. Inspect `hermes --profile <brand> cron list --all`. Pause or remove obsolete Ace jobs that are
    absent from the generated file. Create or edit only the jobs present in that file. Preserve
-   unrelated jobs.
+   unrelated jobs. The synthetic registered-job fixture and pure reconciliation test exercise
+   this comparison without changing live scheduler state.
 4. Restart the selected gateway and reset or refresh its existing sessions so cached support
    instructions cannot continue using a disabled feature.
 5. Resume only the generated Ace jobs that should run for this profile.

@@ -53,10 +53,7 @@ from _lib import brand, store, trace  # noqa: E402
 from _lib.models import Creator  # noqa: E402
 
 NEW, COLLECTING, COMPLETE = "new", "collecting", "complete"
-ONBOARDING_REDIRECT = (
-    "I can help with onboarding here. For anything else, please use the team-help option "
-    "in your onboarding guidance."
-)
+ONBOARDING_REDIRECT = brand.DEFAULT_ONBOARDING_REDIRECT
 
 # Where captured creator details land for the team (override per brand with
 # ace.onboarding.data_channel). Separate from #ace-escalations so signups stay
@@ -271,18 +268,24 @@ def _completed(row: dict) -> bool:
     return bool(row.get("tiktok") and row.get("role"))
 
 
+def configured_redirect(profile: Path | None = None) -> str:
+    """The exact redirect compiled into the profile sidecar and generated SOUL."""
+    return brand.onboarding_redirect(brand.config(profile))
+
+
 def conversation_context(conn, handle: str) -> dict:
+    redirect = configured_redirect()
     row = store.get_onboarding(conn, handle)
     if row is None:
         return {"handle": handle, "state": None, "error": "not found",
-                "outside_scope": ONBOARDING_REDIRECT}
+                "outside_scope": redirect}
     field = None if _completed(row) else next_field(row)
     out = {
         "handle": handle,
         "state": row.get("onboarding_state"),
         "ask": field,
         "question": FIELD_PROMPTS.get(field),
-        "outside_scope": ONBOARDING_REDIRECT,
+        "outside_scope": redirect,
     }
     if _completed(row):
         out["guidance"] = completion_guidance()
@@ -365,7 +368,7 @@ def answer(conn, handle: str, text: str | None = None, now: float | None = None)
             "ask": None,
             "already_complete": True,
             "next_step": "redirect",
-            "redirect": ONBOARDING_REDIRECT,
+            "redirect": configured_redirect(),
             "guidance": completion_guidance(),
         }
 

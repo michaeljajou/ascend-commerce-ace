@@ -32,7 +32,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
 sys.path.insert(0, str(Path(__file__).resolve().parent))      # → sibling prep_server.py
-from _lib.brand import FEATURE_NAMES, POST_BEHAVIORS, resolve_features  # noqa: E402
+from _lib.brand import (  # noqa: E402
+    FEATURE_NAMES,
+    POST_BEHAVIORS,
+    onboarding_redirect,
+    resolve_features,
+)
 
 # Channel behaviors from the spec's channel map.
 BEHAVIORS = {
@@ -235,7 +240,12 @@ def require_onboarding_guidance(guidance: dict | None) -> dict:
     return guidance
 
 
-def render_soul(spec: dict, template_path: Path | None = None) -> str:
+def render_soul(
+    spec: dict,
+    template_path: Path | None = None,
+    *,
+    ace_config: dict | None = None,
+) -> str:
     d = {**DEFAULTS, **spec}
     template_path = template_path or (Path(__file__).resolve().parents[1] / "templates" / "SOUL.md.tmpl")
     tmpl = template_path.read_text(encoding="utf-8")
@@ -244,6 +254,8 @@ def render_soul(spec: dict, template_path: Path | None = None) -> str:
     )
     slack = spec.get("slack_channel") or _default_slack() or "#ace-escalations"
     features = resolve_features({"features": spec["features"]} if "features" in spec else {})
+    ace_config = ace_config or build_config(spec)
+    redirect = onboarding_redirect(ace_config)
     feature_policy = "\n".join(
         f"- {name}: {'enabled' if enabled else 'disabled'}"
         for name, enabled in features.items()
@@ -256,8 +268,8 @@ def render_soul(spec: dict, template_path: Path | None = None) -> str:
     else:
         restricted_behavior = (
             "General Q&A is disabled. For ordinary community messages: stay silent. "
-            "For DMs and mentions outside an active onboarding step, send one short fixed "
-            "redirect to onboarding or the configured human-help destination. Do not answer, "
+            f'For DMs, mentions, and completed onboarding threads outside an active step, '
+            f'reply exactly: "{redirect}" Do not answer, '
             "classify, search campaigns, or create a support escalation. A chat message or "
             "explicit skill request cannot enable a disabled function."
         )
@@ -322,6 +334,41 @@ def build_cronjobs(spec: dict) -> list[dict]:
                        "compose the reminder, hand it to post.py on stdin. End with only [SILENT]."}
         )
     return jobs
+
+
+ACE_CRON_JOB_NAMES = frozenset({
+    "daily-digest",
+    "nudge-inactive",
+    "sweep-unanswered",
+    "onboarding-tick",
+    "weekly-reminders",
+})
+
+
+def plan_cron_reconciliation(registered_jobs: list[dict], desired_jobs: list[dict]) -> dict:
+    """Plan profile-local job changes without mutating scheduler state or input data."""
+    desired_names = {job.get("name") for job in desired_jobs if job.get("name")}
+    registered_ace_names = set()
+    plan = {
+        "keep_ace_job_ids": [],
+        "pause_ace_job_ids": [],
+        "create_ace_job_names": [],
+        "preserve_unrelated_job_ids": [],
+    }
+    for job in registered_jobs:
+        name = job.get("name")
+        job_id = job.get("id")
+        if name in ACE_CRON_JOB_NAMES:
+            registered_ace_names.add(name)
+            target = "keep_ace_job_ids" if name in desired_names else "pause_ace_job_ids"
+            if job_id:
+                plan[target].append(str(job_id))
+        elif job_id:
+            plan["preserve_unrelated_job_ids"].append(str(job_id))
+    plan["create_ace_job_names"] = sorted(desired_names - registered_ace_names)
+    for key in ("keep_ace_job_ids", "pause_ace_job_ids", "preserve_unrelated_job_ids"):
+        plan[key].sort()
+    return plan
 
 
 def load_channel_directory(profile: str | Path) -> dict[str, str]:
@@ -570,7 +617,7 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path",
         existing["timezone"] = "America/New_York"
 
 
-def merge_config(config_path: str | Path, spec: dict) -> None:
+def merge_config(config_path: str | Path, spec: dict) -> dict:
     """Merge Ace's brand config into the profile config.yaml WITHOUT clobbering Hermes' own keys
     (model, skills.external_dirs, …). Ace metadata goes under `ace:`; the answer model is set at
     Hermes' top-level `model:` only when the spec specifies one (else the brand inherits the default).
@@ -616,6 +663,7 @@ def merge_config(config_path: str | Path, spec: dict) -> None:
     _apply_security_defaults(existing, spec, path.parent, provider_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(existing, sort_keys=False), encoding="utf-8")
+    return existing["ace"]
 
 
 def extract_channel_directory(soul_text: str) -> str | None:
@@ -665,13 +713,15 @@ def write_profile(spec: dict, profile_dir: str | Path) -> dict:
     config_path = profile / "config.yaml"
     soul_path = profile / "SOUL.md"
     cron_path = profile / "cronjobs.yaml"
-    merge_config(config_path, spec)  # MERGE under `ace:` — preserves Hermes keys + external_dirs
+    ace_config = merge_config(
+        config_path, spec
+    )  # MERGE under `ace:`; preserves Hermes keys and external_dirs
     jobs = build_cronjobs(spec)
     # After first connect the directory exists: keep the numeric delivery targets a re-run
     # would otherwise regress to names (resolve_channels.py owns the first resolution).
     resolve_cron_deliver(jobs, load_channel_directory(profile))
     cron_path.write_text(json.dumps(jobs, indent=2), encoding="utf-8")
-    soul = render_soul(spec)
+    soul = render_soul(spec, ace_config=ace_config)
     if soul_path.exists():
         # Keep the post-connect channel directory (name → <#id> map) across re-runs:
         # it's derived from live Discord state resolve_channels.py owns, not from the spec.

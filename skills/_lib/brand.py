@@ -33,6 +33,10 @@ FEATURE_NAMES = (
     "reporting",
 )
 DEFAULT_FEATURES = {name: True for name in FEATURE_NAMES}
+DEFAULT_ONBOARDING_REDIRECT = (
+    "I can help with onboarding here. For anything else, please use the team-help option "
+    "in your onboarding guidance."
+)
 
 
 class PolicyError(ValueError):
@@ -124,6 +128,18 @@ def feature_enabled(name: str, profile: Path | None = None) -> bool:
     if name not in FEATURE_NAMES:
         raise PolicyError(f"unknown feature name: {name}")
     return load_policy(profile)[name]
+
+
+def onboarding_redirect(ace_config: dict) -> str:
+    """Return the exact restricted reply compiled from bounded profile guidance."""
+    if not isinstance(ace_config, dict):
+        return DEFAULT_ONBOARDING_REDIRECT
+    onboarding = ace_config.get("onboarding") or {}
+    guidance = onboarding.get("guidance") or {}
+    how_to_reach_team = guidance.get("how_to_reach_team") if isinstance(guidance, dict) else None
+    if not isinstance(how_to_reach_team, str) or not how_to_reach_team.strip():
+        return DEFAULT_ONBOARDING_REDIRECT
+    return "I can help with onboarding here. " + how_to_reach_team.strip()
 
 
 def _config_declares_ace_features(text: str) -> bool:

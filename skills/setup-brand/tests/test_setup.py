@@ -1,3 +1,4 @@
+import copy
 import json
 import sys
 from pathlib import Path
@@ -170,9 +171,27 @@ def test_render_soul_locks_disabled_functions_and_onboarding_redirects():
     ))
     assert "general_qa: disabled" in soul
     assert "ordinary community messages: stay silent" in soul
-    assert "DMs and mentions" in soul
+    assert "DMs, mentions" in soul
     assert "cannot enable a disabled function" in soul
     assert "onboarding.enabled is false" in soul
+
+
+def test_render_soul_includes_the_exact_configured_onboarding_redirect():
+    spec = make_spec(
+        features={name: False for name in setup.FEATURE_NAMES},
+        onboarding={"enabled": True},
+    )
+    ace_config = setup.build_config(spec)
+    ace_config["onboarding"]["guidance"] = {
+        "how_to_reach_team": "Use #help-desk to contact the Agency Team."
+    }
+
+    soul = setup.render_soul(spec, ace_config=ace_config)
+
+    assert (
+        'reply exactly: "I can help with onboarding here. '
+        'Use #help-desk to contact the Agency Team."'
+    ) in soul
 
 
 def test_build_cronjobs_targets_post_channel():
@@ -201,6 +220,30 @@ def test_onboarding_only_profile_keeps_only_the_guarded_onboarding_tick():
     jobs = setup.build_cronjobs(spec)
     assert [job["name"] for job in jobs] == ["onboarding-tick"]
     assert setup.build_config(spec)["onboarding"]["enabled"] is False
+
+
+def test_registered_job_reconciliation_pauses_obsolete_ace_jobs_and_preserves_unrelated():
+    fixture_dir = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "synthetic-agency"
+    registered = json.loads(
+        (fixture_dir / "registered-cronjobs.json").read_text(encoding="utf-8")
+    )
+    original = copy.deepcopy(registered)
+    spec = json.loads((fixture_dir / "brand.json").read_text(encoding="utf-8"))
+
+    plan = setup.plan_cron_reconciliation(registered, setup.build_cronjobs(spec))
+
+    assert plan == {
+        "keep_ace_job_ids": ["ace-onboarding-tick"],
+        "pause_ace_job_ids": [
+            "ace-daily-digest",
+            "ace-nudge-inactive",
+            "ace-sweep-unanswered",
+            "ace-weekly-reminders",
+        ],
+        "create_ace_job_names": [],
+        "preserve_unrelated_job_ids": ["agency-database-backup"],
+    }
+    assert registered == original
 
 
 def test_weekly_reminders_delivers_to_the_home_channel_and_posts_by_script():
@@ -242,10 +285,34 @@ def test_synthetic_onboarding_only_fixture_generates_consistent_policy(tmp_path)
     json_ace = json.loads(Path(written["brand_json"]).read_text())
     assert yaml_ace["features"] == {name: False for name in setup.FEATURE_NAMES}
     assert json_ace["features"] == yaml_ace["features"]
-    assert yaml_ace["onboarding"]["enabled"] is True
+    assert yaml_ace["onboarding"]["enabled"] is False
     assert yaml_ace["onboarding"]["guidance"]["how_to_reach_team"] == (
         "Use #synthetic-help to contact the Synthetic Agency Team."
     )
+    assert (
+        'reply exactly: "I can help with onboarding here. Use #synthetic-help to contact '
+        'the Synthetic Agency Team."'
+    ) in Path(written["soul"]).read_text(encoding="utf-8")
+
+
+def test_synthetic_onboarding_only_active_flow_uses_a_test_local_copy(tmp_path):
+    fixture_dir = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "synthetic-agency"
+    stored = json.loads((fixture_dir / "brand.json").read_text(encoding="utf-8"))
+    spec = copy.deepcopy(stored)
+    spec["onboarding"]["enabled"] = True
+    data_dir = tmp_path / "ace"
+    data_dir.mkdir()
+    (data_dir / "knowledge.yaml").write_text(
+        (fixture_dir / "knowledge.yaml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+
+    written = setup.write_profile(spec, tmp_path)
+
+    import yaml
+
+    assert stored["onboarding"]["enabled"] is False
+    generated = yaml.safe_load(Path(written["config"]).read_text())
+    assert generated["ace"]["onboarding"]["enabled"] is True
 
 
 def test_onboarding_only_activation_requires_complete_bounded_guidance(tmp_path):
