@@ -336,12 +336,16 @@ def build_cronjobs(spec: dict) -> list[dict]:
     return jobs
 
 
+# Every scheduled job Ace owns: the ones build_cronjobs generates, plus skill blueprints it
+# does not generate. A registered job missing from this set is planned as unrelated and
+# left running, so a new scheduled skill must be added here.
 ACE_CRON_JOB_NAMES = frozenset({
     "daily-digest",
     "nudge-inactive",
     "sweep-unanswered",
     "onboarding-tick",
     "weekly-reminders",
+    "results-announcement",
 })
 
 

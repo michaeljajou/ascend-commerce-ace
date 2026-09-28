@@ -256,6 +256,11 @@ def test_onboarding_only_profile_keeps_only_the_guarded_onboarding_tick():
 
 
 def test_registered_job_reconciliation_pauses_obsolete_ace_jobs_and_preserves_unrelated():
+    """**The bug this test also exists for.** ENG-299 agent review round 3 (28 Sep 2026):
+    the results-announcement skill ships a scheduled blueprint, but setup never generates
+    that job, so its name was missing from ACE_CRON_JOB_NAMES. A registered, active
+    results-announcement job was planned under preserve_unrelated_job_ids and would have
+    stayed registered through an onboarding-only transition with announcements disabled."""
     fixture_dir = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "synthetic-agency"
     registered = json.loads(
         (fixture_dir / "registered-cronjobs.json").read_text(encoding="utf-8")
@@ -270,6 +275,7 @@ def test_registered_job_reconciliation_pauses_obsolete_ace_jobs_and_preserves_un
         "pause_ace_job_ids": [
             "ace-daily-digest",
             "ace-nudge-inactive",
+            "ace-results-announcement",
             "ace-sweep-unanswered",
             "ace-weekly-reminders",
         ],
@@ -277,6 +283,26 @@ def test_registered_job_reconciliation_pauses_obsolete_ace_jobs_and_preserves_un
         "preserve_unrelated_job_ids": ["agency-database-backup"],
     }
     assert registered == original
+
+
+def test_every_ace_scheduled_job_is_recognized_by_reconciliation():
+    """Reconciliation can only pause what it recognizes as Ace's. Ace owns every job setup
+    can generate and every skill that ships a scheduled blueprint, whether or not setup
+    generates it; a name missing here is planned as an unrelated job and left running."""
+    import yaml
+
+    skills_dir = Path(__file__).resolve().parents[2]
+    blueprints = set()
+    for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
+        front_matter = skill_md.read_text(encoding="utf-8").split("---")[1]
+        meta = yaml.safe_load(front_matter) or {}
+        if ((meta.get("metadata") or {}).get("hermes") or {}).get("blueprint"):
+            blueprints.add(meta["name"])
+    generated = {job["name"] for job in setup.build_cronjobs(make_spec())}
+
+    assert "results-announcement" in blueprints          # the scan found the real blueprints
+    assert {"onboarding-tick", "sweep-unanswered"} <= generated
+    assert blueprints | generated <= setup.ACE_CRON_JOB_NAMES
 
 
 def test_weekly_reminders_delivers_to_the_home_channel_and_posts_by_script():

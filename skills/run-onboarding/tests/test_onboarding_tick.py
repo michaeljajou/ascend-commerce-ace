@@ -544,6 +544,97 @@ def test_rejoin_after_leaving_restarts_automatically(tmp_path, monkeypatch):
     assert ("/channels/7000", {"archived": True, "locked": False}, "PATCH") in fakes.writes
 
 
+def test_completed_creator_who_leaves_and_rejoins_gets_roles_again(tmp_path, monkeypatch):
+    """**The bug this test exists for.** ENG-299 agent review round 3 (28 Sep 2026): a
+    creator who finished onboarding, left, and rejoined was answered with the
+    already-complete redirect on their first message back. The rejoin keeps their tiktok,
+    email and role on purpose and restarts the row at collecting, but the idempotence
+    check read the remembered tiktok and role as completion. Discord had stripped their
+    roles when they left, so with the access gate on they stayed locked out.
+
+    Runs the real tick, onboarding flow and role assignment against one profile DB; only
+    the Discord and Slack transports are faked."""
+    import assign_role
+    import onboarding
+    from _lib import sheet, store
+
+    make_profile(tmp_path, features={name: False for name in tick.FEATURE_NAMES})
+    cfg_path = tmp_path / "config.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["ace"]["onboarding"]["guidance"] = {
+        "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
+        "getting_started": ["Introduce yourself."],
+        "how_to_reach_team": "Use #help-desk to contact the Agency Team.",
+    }
+    cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    seed_state(tmp_path)
+    monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "ace"))
+
+    role_grants, signups = [], []
+
+    def discord_roles_api(token, path, method="GET"):
+        if path == "/guilds/g1/roles":
+            return [{"id": "r1", "name": "Ascend Team"}, {"id": "r2", "name": "Creator"}]
+        role_grants.append((method, path))
+        return {}
+
+    monkeypatch.setattr(assign_role, "request", discord_roles_api)
+    monkeypatch.setattr(onboarding, "_post",
+                        lambda text, key, default=None: signups.append(key) or True)
+    monkeypatch.setattr(sheet, "sync_creator", lambda row, **kw: False)
+    grant = ("PUT", "/guilds/g1/members/77/roles/r2")
+    member = {"user": {"id": "77", "username": "boomerang"}, "roles": []}
+    fakes = FakeAPIs(members=[member])
+
+    # First lifecycle: joins, answers every question, is guided.
+    run_tick(tmp_path, monkeypatch, fakes)
+    conn = store.connect()
+    assert onboarding.answer(conn, "@boomerang", "boom.tt")["ask"] == "email"
+    assert onboarding.answer(conn, "@boomerang", "b@x.com")["ask"] == "phone"
+    first = onboarding.answer(conn, "@boomerang", "skip")
+    assert first["state"] == "complete" and first["assigned"] == ["Creator"]
+    onboarding.guided(conn, "@boomerang")
+    assert role_grants == [grant] and signups == ["data_channel"]
+
+    # Leaves: Discord drops their roles; the tick stops the clock.
+    fakes.members = []
+    run_tick(tmp_path, monkeypatch, fakes)
+    assert db_row(tmp_path, "@boomerang")["onboarding_state"] == "left"
+
+    # Rejoins: fresh lifecycle, remembered identity.
+    fakes.members = [member]
+    run_tick(tmp_path, monkeypatch, fakes)
+    remembered = {"tiktok": "boom.tt", "email": "b@x.com", "skipped_fields": "phone",
+                  "role": "Creator", "discord_id": "77"}
+    row = db_row(tmp_path, "@boomerang")
+    assert row["onboarding_state"] == "collecting" and row["thread_id"] == "7002"
+    assert row["guided_at"] is None
+    assert {key: row[key] for key in remembered} == remembered
+
+    context = onboarding.conversation_context(conn, "@boomerang")
+    assert context["state"] == "collecting" and "guidance" not in context
+
+    back = onboarding.answer(conn, "@boomerang", "hey, I'm back")
+    assert "already_complete" not in back
+    assert back["ok"] is True and back["state"] == "complete"
+    assert back["next_step"] == "guidance" and back["guidance_mode"] == "compiled"
+    assert back["assigned"] == ["Creator"]
+    assert role_grants == [grant, grant]                                # roles assigned again
+    row = db_row(tmp_path, "@boomerang")
+    assert {key: row[key] for key in remembered} == remembered         # nothing re-collected
+    assert row["retries"] == 0 and row["onboarding_state"] == "complete"
+    onboarding.guided(conn, "@boomerang")
+
+    # An ordinary message after the second completion changes nothing.
+    later = onboarding.answer(conn, "@boomerang", "what campaigns are live?")
+    assert later["already_complete"] is True and later["next_step"] == "redirect"
+    assert later["redirect"] == (
+        "I can help with onboarding here. Use #help-desk to contact the Agency Team.")
+    assert role_grants == [grant, grant]
+    assert signups == ["data_channel", "data_channel"]                  # one per lifecycle
+    assert db_row(tmp_path, "@boomerang")["onboarding_state"] == "guided"
+
+
 def test_escalated_member_still_present_is_not_reonboarded(tmp_path, monkeypatch):
     """An open escalated case for someone who never left must stay untouched."""
     make_profile(tmp_path)

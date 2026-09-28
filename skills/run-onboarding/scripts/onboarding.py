@@ -270,8 +270,22 @@ def completion_guidance(profile: Path | None = None) -> dict:
 
 
 def _completed(row: dict) -> bool:
-    """Completion evidence survives later guided, nudged, and active states."""
-    return bool(row.get("tiktok") and row.get("role"))
+    """Whether THIS lifecycle finished, not whether the creator ever onboarded.
+
+    tiktok and role are remembered when a creator rejoins: onboarding_tick restarts the
+    row at ``collecting`` and clears its lifecycle stamps, because Discord stripped the
+    roles when they left and they need them assigned again. So the remembered values
+    alone prove nothing. ``complete`` marks the lifecycle finished and ``guided`` stamps
+    ``guided_at``, which survives the later guided, nudged, active, escalated and
+    resolved states. A restarted creator can reach nudged, escalated or flagged without
+    finishing, and carries no ``guided_at``.
+    """
+    if not (row.get("tiktok") and row.get("role")):
+        return False
+    state = row.get("onboarding_state")
+    if state in (NEW, COLLECTING):
+        return False
+    return state == COMPLETE or bool(row.get("guided_at"))
 
 
 def configured_redirect(profile: Path | None = None) -> str:

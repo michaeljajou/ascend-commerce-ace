@@ -550,6 +550,72 @@ def test_post_completion_message_never_repeats_completion_side_effects(conn, mon
     assert out["ask"] is None
 
 
+def seed_remembered_creator(conn, state, guided_at=None):
+    """A creator Ace already knows: fields and role stored, lifecycle set by the caller."""
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.set_fields(conn, "@ava", tiktok="ava.tt", email="a@x.com")
+    store.update_onboarding(conn, "@ava", role="Creator", discord_id="77",
+                            skipped_fields="phone", retries=0,
+                            onboarding_state=state, guided_at=guided_at)
+
+
+def record_role_assignments(monkeypatch):
+    granted: list[str] = []
+    monkeypatch.setattr(assign_role, "assign",
+                        lambda user_id, roles=None, profile=None: granted.append(user_id) or {
+                            "ok": True, "assigned": ["onboarded", "creator"]})
+    return granted
+
+
+@pytest.mark.parametrize("state", ["new", "collecting", "nudged", "escalated", "flagged"])
+def test_remembered_fields_in_a_restarted_lifecycle_are_not_completion(
+        conn, offline, monkeypatch, state):
+    """**The bug this test exists for.** ENG-299 agent review round 3 (28 Sep 2026): the
+    idempotence check read any row with a stored tiktok and role as already complete.
+    onboarding_tick keeps both when a creator rejoins and restarts the row at collecting,
+    because Discord stripped their roles when they left. answer() returned
+    already_complete with the redirect, so the returning creator never got their roles
+    back. nudged, escalated and flagged are here because a restarted creator reaches them
+    without finishing: they carry no guided_at."""
+    seed_remembered_creator(conn, state)
+    granted = record_role_assignments(monkeypatch)
+
+    context = onboarding.conversation_context(conn, "@ava")
+    out = onboarding.answer(conn, "@ava", "hey, I'm back", now=300.0)
+
+    assert "guidance" not in context                     # not presented as finished
+    assert "already_complete" not in out
+    assert out["ok"] is True and out["state"] == onboarding.COMPLETE
+    assert out["next_step"] == "guidance"
+    assert granted == ["77"]                              # roles restored
+    assert [key for key, _ in offline] == ["data_channel"]
+    row = onboarding.status(conn, "@ava")
+    assert (row["tiktok"], row["email"], row["declined"]) == ("ava.tt", "a@x.com", ["phone"])
+    assert row["retries"] == 0                           # their message was not read as a field
+
+
+@pytest.mark.parametrize("state,guided_at", [
+    ("complete", None),
+    ("guided", "210.0"),
+    ("nudged", "210.0"),
+    ("active", "210.0"),
+    ("escalated", "210.0"),
+    ("resolved", "210.0"),
+])
+def test_a_finished_lifecycle_stays_idempotent_in_every_later_state(
+        conn, offline, monkeypatch, state, guided_at):
+    seed_remembered_creator(conn, state, guided_at)
+    granted = record_role_assignments(monkeypatch)
+
+    out = onboarding.answer(conn, "@ava", "Can you answer a general question?", now=300.0)
+    again = onboarding.complete(conn, "@ava", now=310.0)
+
+    assert out["already_complete"] is True and out["next_step"] == "redirect"
+    assert again["already_complete"] is True and again["assigned"] == []
+    assert granted == [] and offline == []
+    assert onboarding.status(conn, "@ava")["onboarding_state"] == state
+
+
 def test_completed_creator_gets_the_exact_configured_redirect(conn, monkeypatch):
     monkeypatch.setattr(brand, "config", lambda profile=None: {
         "onboarding": {"guidance": {

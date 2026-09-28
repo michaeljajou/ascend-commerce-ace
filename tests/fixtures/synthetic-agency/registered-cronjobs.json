@@ -4,5 +4,6 @@
   {"id": "ace-sweep-unanswered", "name": "sweep-unanswered", "status": "paused"},
   {"id": "ace-onboarding-tick", "name": "onboarding-tick", "status": "paused"},
   {"id": "ace-weekly-reminders", "name": "weekly-reminders", "status": "active"},
+  {"id": "ace-results-announcement", "name": "results-announcement", "status": "active"},
   {"id": "agency-database-backup", "name": "database-backup", "status": "active"}
 ]

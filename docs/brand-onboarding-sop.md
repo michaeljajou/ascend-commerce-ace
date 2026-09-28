@@ -416,7 +416,9 @@ The deterministic fixture `tests/fixtures/synthetic-agency/registered-cronjobs.j
 `test_registered_job_reconciliation_pauses_obsolete_ace_jobs_and_preserves_unrelated` cover the
 same comparison before any live command is run. The reconciliation plan keeps registered Ace
 jobs still present in `cronjobs.yaml`, pauses obsolete Ace job IDs, creates missing desired Ace
-job names, and preserves unrelated job IDs. Apply that plan only to the selected profile.
+job names, and preserves unrelated job IDs. Ace jobs include skill blueprints that setup never
+generates, such as `results-announcement`; a registered one is paused, not preserved. Apply
+that plan only to the selected profile.
 
 **Live run:** ✅ 2026-08-04 I Am Joy — five jobs registered as uid 10000 +
 HOME=/opt/data, paused within the same minute (sweep's first fire was 2 minutes out),
