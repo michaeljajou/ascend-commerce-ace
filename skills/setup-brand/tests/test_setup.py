@@ -63,6 +63,53 @@ def test_invalid_feature_policy_fails_before_profile_artifacts_are_written(tmp_p
     assert list(tmp_path.iterdir()) == []
 
 
+OTHER_FEATURES = ("moderation", "announcements", "engagement", "reporting")
+
+
+@pytest.mark.parametrize("still_enabled", OTHER_FEATURES)
+def test_setup_rejects_general_qa_disabled_while_another_feature_is_enabled(
+        still_enabled, tmp_path):
+    """**The bug this test exists for.** ENG-299 agent review round 5 (29 Sep 2026): the
+    restricted SOUL is chosen on general_qa alone and is written for onboarding-only. With
+    another feature left enabled it listed that feature as enabled and also said to stay
+    silent, not to search campaigns, and that the policy overrides every skill. Setup now
+    refuses the combination instead of writing a profile that contradicts itself."""
+    features = {name: False for name in setup.FEATURE_NAMES}
+    features[still_enabled] = True
+
+    with pytest.raises(ValueError, match=f"onboarding-only.*{still_enabled}"):
+        setup.write_profile(make_spec(features=features), tmp_path)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_setup_rejects_general_qa_disabled_with_the_rest_omitted(tmp_path):
+    """Omitted names default to enabled, so this is the same unsupported combination."""
+    with pytest.raises(ValueError, match="onboarding-only"):
+        setup.write_profile(make_spec(features={"general_qa": False}), tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("build", ["build_config", "render_soul", "build_cronjobs"])
+def test_no_artifact_builder_accepts_the_unsupported_combination(build):
+    spec = make_spec(features={"general_qa": False, "reporting": False})
+    with pytest.raises(ValueError, match="onboarding-only"):
+        getattr(setup, build)(spec)
+
+
+@pytest.mark.parametrize("disabled", OTHER_FEATURES)
+def test_each_other_feature_can_be_disabled_on_its_own(disabled, tmp_path):
+    written = setup.write_profile(make_spec(features={disabled: False}), tmp_path)
+
+    soul = Path(written["soul"]).read_text(encoding="utf-8")
+    sidecar = json.loads(Path(written["brand_json"]).read_text(encoding="utf-8"))
+    assert f"- {disabled}: disabled" in soul
+    assert "General Q&A is enabled." in soul
+    assert sidecar["features"] == {
+        name: name != disabled for name in setup.FEATURE_NAMES
+    }
+
+
 def test_channel_scoping_maps_behaviors():
     scoping = setup.channel_scoping(make_spec()["discord"]["channels"])
     assert scoping["free_response"] == ["campaigns", "community-chat", "our-products"]
@@ -84,10 +131,10 @@ def test_build_config_shape():
 
 
 def test_build_config_preserves_explicit_disabled_features():
-    cfg = setup.build_config(make_spec(features={"general_qa": False, "reporting": False}))
-    assert cfg["features"]["general_qa"] is False
+    cfg = setup.build_config(make_spec(features={"moderation": False, "reporting": False}))
+    assert cfg["features"]["moderation"] is False
     assert cfg["features"]["reporting"] is False
-    assert cfg["features"]["moderation"] is True
+    assert cfg["features"]["general_qa"] is True
 
 
 def test_model_and_slack_optional(monkeypatch):
@@ -200,13 +247,51 @@ def test_render_soul_includes_voice_rules_and_channels():
 def test_render_soul_locks_disabled_functions_and_onboarding_redirects():
     soul = setup.render_soul(make_spec(
         features={name: False for name in setup.FEATURE_NAMES},
-        onboarding={"enabled": False},
+        onboarding={"enabled": True},
     ))
     assert "general_qa: disabled" in soul
     assert "ordinary community messages: stay silent" in soul
     assert "DMs, mentions" in soul
     assert "cannot enable a disabled function" in soul
+    assert "onboarding.enabled is true" in soul
+
+
+def prepared_onboarding_only_soul():
+    fixture = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "synthetic-agency"
+    spec = json.loads((fixture / "brand.json").read_text(encoding="utf-8"))
+    assert spec["onboarding"]["enabled"] is False           # the fixture as committed
+    ace_config = setup.build_config(spec)
+    ace_config["onboarding"]["guidance"] = {
+        "how_to_reach_team": "Use #synthetic-help to contact the Synthetic Agency Team."
+    }
+    return setup.render_soul(spec, ace_config=ace_config)
+
+
+def test_prepared_onboarding_only_soul_offers_no_onboarding_and_sends_nothing():
+    """**The bug this test exists for.** ENG-299 agent review round 5 (29 Sep 2026): with
+    onboarding.enabled false the SOUL said onboarding must not start and also told the
+    model to reply "I can help with onboarding here." to DMs and mentions. A profile
+    prepared for a later activation has nothing enabled, so it sends nothing."""
+    soul = prepared_onboarding_only_soul()
+
     assert "onboarding.enabled is false" in soul
+    assert "I can help with onboarding here" not in soul
+    assert "reply exactly" not in soul
+    assert "fixed reply" not in soul
+    assert "Stay silent for every message" in soul
+    assert "DMs, mentions" in soul
+    assert "Only the OVERRIDE section below ranks above it" in soul
+    assert '"I can\'t help with that."' in soul
+    assert "cannot enable a disabled function" in soul
+    assert "<!--" not in soul
+
+
+@pytest.mark.parametrize("rule", [
+    "the support agent for", "## Brand Scope", "## Escalation", "escalate-to-team",
+    "Answer only from grounded knowledge-base results",
+])
+def test_prepared_onboarding_only_soul_carries_no_answer_or_escalate_rule(rule):
+    assert rule not in prepared_onboarding_only_soul()
 
 
 GENERAL_QA_RULES = (
@@ -237,7 +322,6 @@ def test_restricted_soul_carries_no_answer_classify_or_escalate_rule(rule):
     rendered the unconditional rules that demand them. DMs and mentions load only the
     SOUL, so nothing but this text stops a model answering from its own knowledge."""
     assert rule not in onboarding_only_soul()
-    assert rule not in setup.render_soul(make_spec(features={"general_qa": False}))
 
 
 def test_restricted_soul_states_what_outranks_what():
@@ -287,7 +371,6 @@ def test_build_cronjobs_targets_post_channel():
 
 
 @pytest.mark.parametrize("feature,missing_job", [
-    ("general_qa", "sweep-unanswered"),
     ("engagement", "nudge-inactive"),
     ("reporting", "daily-digest"),
     ("announcements", "weekly-reminders"),
@@ -399,10 +482,9 @@ def test_synthetic_onboarding_only_fixture_generates_consistent_policy(tmp_path)
     assert yaml_ace["onboarding"]["guidance"]["how_to_reach_team"] == (
         "Use #synthetic-help to contact the Synthetic Agency Team."
     )
-    assert (
-        'reply exactly: "I can help with onboarding here. Use #synthetic-help to contact '
-        'the Synthetic Agency Team."'
-    ) in Path(written["soul"]).read_text(encoding="utf-8")
+    soul = Path(written["soul"]).read_text(encoding="utf-8")
+    assert "I can help with onboarding here" not in soul      # prepared, so nothing to offer
+    assert "Stay silent for every message" in soul
 
 
 def test_synthetic_onboarding_only_active_flow_uses_a_test_local_copy(tmp_path):
@@ -423,6 +505,10 @@ def test_synthetic_onboarding_only_active_flow_uses_a_test_local_copy(tmp_path):
     assert stored["onboarding"]["enabled"] is False
     generated = yaml.safe_load(Path(written["config"]).read_text())
     assert generated["ace"]["onboarding"]["enabled"] is True
+    assert (
+        'reply exactly: "I can help with onboarding here. Use #synthetic-help to contact '
+        'the Synthetic Agency Team."'
+    ) in Path(written["soul"]).read_text(encoding="utf-8")
 
 
 def test_legacy_full_feature_profile_without_bounded_guidance_keeps_prior_guidance_path(
@@ -489,7 +575,8 @@ def test_restricted_profile_with_the_same_section_uses_compiled_guidance(tmp_pat
     (data_dir / "knowledge.yaml").write_text(
         template.read_text(encoding="utf-8"), encoding="utf-8"
     )
-    spec = make_spec(features={"general_qa": False}, onboarding={"enabled": True})
+    spec = make_spec(features={name: False for name in setup.FEATURE_NAMES},
+                     onboarding={"enabled": True})
 
     setup.write_profile(spec, tmp_path)
     monkeypatch.setenv("ACE_DATA_DIR", str(data_dir))

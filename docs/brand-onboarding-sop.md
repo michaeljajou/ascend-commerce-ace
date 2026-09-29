@@ -233,6 +233,8 @@ and permissions complete. Residue open: bot role `Ace` at position 1 (drag above
    `features` accepts five booleans: `general_qa`, `moderation`, `announcements`,
    `engagement`, and `reporting`. Omitted keys default to true for backward compatibility.
    For onboarding-only operation, set all five to false. This does not disable onboarding.
+   `general_qa` can be disabled only that way: setup rejects `general_qa: false` while any
+   other feature is enabled or omitted. The other four can each be disabled on their own.
 2. Store the spec at `<profile>/spec.json` (documents the brand; makes re-runs one
    command), then run `python skills/setup-brand/scripts/setup.py --spec
    <profile>/spec.json --profile-dir <profile>` (via the Hermes venv in the container).

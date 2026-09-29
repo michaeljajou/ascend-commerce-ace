@@ -78,6 +78,9 @@ Each brand spec may set boolean `features.general_qa`, `features.moderation`,
 `features.announcements`, `features.engagement`, and `features.reporting`. Omitted settings default
 to enabled for compatibility. An onboarding-only profile sets all five to false, then follows the
 feature-policy reconciliation procedure in `skills/setup-brand/SKILL.md` before activation.
+`moderation`, `announcements`, `engagement`, and `reporting` can each be disabled on their own.
+`general_qa` can be disabled only together with the other four; setup rejects any other
+combination before it writes anything.
 
 ## Develop
 

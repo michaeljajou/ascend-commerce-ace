@@ -1,0 +1,30 @@
+{
+  "brand_id": "legacy-brand",
+  "brand_name": "Legacy Brand",
+  "voice": "Warm, direct, and upbeat.",
+  "model": "anthropic/claude-sonnet-4-6",
+  "slack_channel": "#legacy-ops",
+  "growi_project": "legacy-project",
+  "discord": {
+    "guild_id": "200000000000000002",
+    "home_channel": "agent-ace",
+    "team_role": "Legacy Team",
+    "sweep_minutes": 15,
+    "channels": {
+      "announcements": "POST_ONLY",
+      "campaigns": "POST_ANSWER",
+      "community-chat": "FULL_ACTIVE",
+      "our-products": "ANSWER",
+      "success-stories": "MONITOR_ONLY",
+      "paid-collabs": "PAID_COLLAB",
+      "ambassadors": "AMBASSADOR",
+      "content-inspo": "INACTIVE"
+    }
+  },
+  "onboarding": {
+    "enabled": true,
+    "creator_roles": ["onboarded", "creator"],
+    "welcome_message": "Welcome to Legacy Brand!",
+    "data_channel": "#legacy-onboarding"
+  }
+}

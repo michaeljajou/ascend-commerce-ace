@@ -98,6 +98,16 @@ An onboarding-only profile disables every optional feature:
 Keep onboarding disabled until the profile is ready for live creator joins. Setting all five
 feature values to false does not disable onboarding.
 
+Supported combinations:
+- `moderation`, `announcements`, `engagement`, and `reporting` can each be disabled on their
+  own, in any mix, while `general_qa` stays enabled.
+- `general_qa` can be disabled only in the onboarding-only profile above, with the other four
+  disabled too. Setup rejects `general_qa: false` with any other feature enabled, including
+  one left out of the spec, and writes nothing.
+- While an onboarding-only profile has `onboarding.enabled: false`, its SOUL tells the agent to
+  stay silent for every message. The onboarding and team-help redirect applies once
+  onboarding is enabled.
+
 ## Brand knowledge
 The brand's knowledge is a **`knowledge.yaml`** file the team maintains in the profile's data dir
 (brief, FAQ, commission, samples, compliance, campaigns, …). It's read live by `get-knowledge` —
@@ -109,7 +119,7 @@ For onboarding, setup reads only `onboarding.channels`, `onboarding.getting_star
 agent after completion. Re-run setup after changing those onboarding sections. Other knowledge
 edits still apply to `get-knowledge` on the next read when general Q&A is enabled. A profile with
 general Q&A enabled gets the same copy but keeps its prior completion guidance, grounded in
-samples and the live campaign; the copy changes nothing for it except the redirect text.
+samples and the live campaign; the copy changes nothing for it.
 
 ## Procedure
 1. Gather the spec (ask the operator, or read a config file).

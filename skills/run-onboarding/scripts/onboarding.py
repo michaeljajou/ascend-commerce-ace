@@ -375,16 +375,21 @@ def answer(conn, handle: str, text: str | None = None, now: float | None = None)
         row = store.get_onboarding(conn, handle) or {}
     if _completed(row):
         guidance_context = completion_guidance_context()
-        return {
+        out = {
             "ok": True,
             "handle": handle,
             "state": row.get("onboarding_state"),
             "ask": None,
             "already_complete": True,
-            "next_step": "redirect",
-            "redirect": configured_redirect(),
             **guidance_context,
         }
+        if guidance_context["guidance_mode"] == "legacy_full_feature":
+            # A brand with general Q&A answers a creator it already onboarded, as before.
+            out["next_step"] = "answer"
+        else:
+            out["next_step"] = "redirect"
+            out["redirect"] = configured_redirect()
+        return out
 
     source = "argument"
     if not (text or "").strip():

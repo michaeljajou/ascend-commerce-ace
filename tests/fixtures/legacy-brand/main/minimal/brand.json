@@ -1,0 +1,46 @@
+{
+  "brand_id": "legacy-minimal",
+  "brand_name": "legacy-minimal",
+  "classify_model": "anthropic/claude-haiku-4-5",
+  "discord": {
+    "channels": {
+      "announcements": "POST_ONLY",
+      "community-chat": "FULL_ACTIVE"
+    },
+    "guild_id": "200000000000000003",
+    "home_channel": "agent-ace",
+    "scoping": {
+      "free_response": [
+        "community-chat"
+      ],
+      "ignored": [
+        "announcements"
+      ],
+      "monitor": [],
+      "post_targets": [
+        "announcements"
+      ]
+    },
+    "sweep_minutes": 10,
+    "team_role": "Ascend Team"
+  },
+  "knowledge_file": "knowledge.yaml",
+  "onboarding": {
+    "archive_days": 7,
+    "creator_roles": [
+      "onboarded",
+      "creator"
+    ],
+    "data_channel": "#ace-onboarding",
+    "enabled": false,
+    "escalate_days": 7,
+    "max_retries": 3,
+    "nudge_hours": 48,
+    "nudge_via": "dm",
+    "staff_role": "Ascend Team",
+    "test_escalate_minutes": 8,
+    "test_mode": false,
+    "test_nudge_minutes": 3
+  },
+  "slack_channel": "#ace-escalations"
+}

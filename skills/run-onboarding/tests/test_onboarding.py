@@ -546,8 +546,53 @@ def test_post_completion_message_never_repeats_completion_side_effects(conn, mon
     out = onboarding.answer(conn, "@ava", "Can you answer a general question?", now=300.0)
 
     assert out["already_complete"] is True
-    assert out["next_step"] == "redirect"
     assert out["ask"] is None
+
+
+def restrict_to_onboarding(monkeypatch):
+    """The onboarding-only policy, with the guidance setup compiles for it."""
+    monkeypatch.setattr(brand, "load_policy",
+                        lambda profile=None: {name: False for name in brand.FEATURE_NAMES})
+    monkeypatch.setattr(brand, "config", lambda profile=None: {
+        "onboarding": {"guidance": {
+            "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
+            "getting_started": ["Introduce yourself."],
+            "how_to_reach_team": "Use #help-desk to contact the Agency Team.",
+        }}
+    })
+
+
+def test_a_general_qa_brand_is_told_to_answer_a_finished_creator(conn):
+    """**The bug this test exists for.** ENG-299 (29 Sep 2026): a creator who had finished
+    onboarding asked a question in their thread. On `main` the skill told every brand to
+    answer it. The onboarding-only work made the script return next_step "redirect" with
+    the onboarding-only reply for every profile, so a brand with general Q&A enabled
+    stopped answering creators it had already onboarded."""
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.set_fields(conn, "@ava", tiktok="ava.tt")
+    onboarding.complete(conn, "@ava", now=200.0)
+
+    out = onboarding.answer(conn, "@ava", "What campaigns are active?", now=300.0)
+
+    assert out["already_complete"] is True
+    assert out["guidance_mode"] == "legacy_full_feature"
+    assert out["next_step"] == "answer"
+    assert "redirect" not in out
+
+
+def test_an_onboarding_only_profile_is_told_to_redirect_a_finished_creator(conn, monkeypatch):
+    restrict_to_onboarding(monkeypatch)
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.set_fields(conn, "@ava", tiktok="ava.tt")
+    onboarding.complete(conn, "@ava", now=200.0)
+
+    out = onboarding.answer(conn, "@ava", "What campaigns are active?", now=300.0)
+
+    assert out["already_complete"] is True
+    assert out["next_step"] == "redirect"
+    assert out["redirect"] == (
+        "I can help with onboarding here. Use #help-desk to contact the Agency Team."
+    )
 
 
 def seed_remembered_creator(conn, state, guided_at=None):
@@ -596,6 +641,7 @@ def test_remembered_fields_in_a_restarted_lifecycle_are_not_completion(
     assert row["retries"] == 0                           # their message was not read as a field
 
 
+@pytest.mark.parametrize("restricted,next_step", [(False, "answer"), (True, "redirect")])
 @pytest.mark.parametrize("state,guided_at", [
     ("complete", None),
     ("guided", "210.0"),
@@ -605,14 +651,16 @@ def test_remembered_fields_in_a_restarted_lifecycle_are_not_completion(
     ("resolved", "210.0"),
 ])
 def test_a_finished_lifecycle_stays_idempotent_in_every_later_state(
-        conn, offline, monkeypatch, state, guided_at):
+        conn, offline, monkeypatch, state, guided_at, restricted, next_step):
+    if restricted:
+        restrict_to_onboarding(monkeypatch)
     seed_remembered_creator(conn, state, guided_at)
     granted = record_role_assignments(monkeypatch)
 
     out = onboarding.answer(conn, "@ava", "Can you answer a general question?", now=300.0)
     again = onboarding.complete(conn, "@ava", now=310.0)
 
-    assert out["already_complete"] is True and out["next_step"] == "redirect"
+    assert out["already_complete"] is True and out["next_step"] == next_step
     assert again["already_complete"] is True and again["assigned"] == []
     assert granted == [] and offline == []
     assert onboarding.status(conn, "@ava")["onboarding_state"] == state

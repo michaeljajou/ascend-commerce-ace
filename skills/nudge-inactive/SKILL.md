@@ -32,8 +32,7 @@ Daily (blueprint). Acts only on creators who completed onboarding.
    ```
    Output: `{"nudge": ["@..."], "flag": ["@..."]}`.
 2. For each `nudge` handle → send a short, friendly DM/mention pointing to something easy to do
-   (introduce themselves, join the current campaign). Ground campaign specifics with
-   `get-campaigns --purpose engagement`; do not read the general knowledge file.
+   (introduce themselves, join the current campaign). Ground specifics with `get-knowledge`.
 3. For each `flag` handle → post a brief note to the team Slack channel so the team can reach
    out (the script brand-tags it automatically):
    ```

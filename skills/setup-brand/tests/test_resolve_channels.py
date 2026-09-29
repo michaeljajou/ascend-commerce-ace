@@ -162,7 +162,10 @@ def test_resolve_channels_keeps_json_sidecar_in_sync(tmp_path, monkeypatch):
     make_profile(tmp_path)
     cfg_path = tmp_path / "config.yaml"
     cfg = yaml.safe_load(cfg_path.read_text())
-    cfg["ace"]["features"] = {"general_qa": False}
+    cfg["ace"]["features"] = {
+        name: False for name in
+        ("general_qa", "moderation", "announcements", "engagement", "reporting")
+    }
     cfg["ace"]["onboarding"] = {"enabled": True, "channel_id": "900"}
     cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
     monkeypatch.setattr(resolve_channels, "_discord",
