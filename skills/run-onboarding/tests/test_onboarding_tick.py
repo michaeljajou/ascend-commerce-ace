@@ -340,17 +340,23 @@ def test_engagement_enabled_keeps_a_guided_thread_when_escalation_cannot_post(
     make_profile(tmp_path, test_mode=False)                  # real 48h / 7d / 7d windows
     seed_state(tmp_path)
     conn = tick.open_db(tmp_path)
+    # complete() stamps last_active_at, so a real guided row always has one. Without it
+    # cleanup has no date and skips the row whatever states it selects.
     conn.execute(
         "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
-        " nudged_at, guided_at) VALUES ('@quiet','guided','77','7001',?,?,?)",
-        (ts_ago(days=11), ts_ago(days=9), ts_ago(days=8)))
+        " nudged_at, guided_at, last_active_at)"
+        " VALUES ('@quiet','guided','77','7001',?,?,?,?)",
+        (ts_ago(days=11), ts_ago(days=9), ts_ago(days=8), ts_ago(days=8)))
     conn.commit()
     fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "quiet"}, "roles": []}])
-    fakes.slack = lambda token, method, payload: {"ok": False, "error": "channel_not_found"}
+    escalations = []
+    fakes.slack = lambda token, method, payload: (
+        escalations.append(method) or {"ok": False, "error": "channel_not_found"})
 
     run_tick(tmp_path, monkeypatch, fakes)
 
     row = db_row(tmp_path, "@quiet")
+    assert escalations == ["chat.postMessage"]               # it was due, and could not post
     assert row["onboarding_state"] == "guided" and row["thread_id"] == "7001"
     assert ARCHIVE_7001 not in fakes.writes
 
@@ -363,8 +369,8 @@ def test_engagement_enabled_keeps_a_guided_thread_shorter_archive_window(
     conn = tick.open_db(tmp_path)
     conn.execute(
         "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
-        " guided_at) VALUES ('@recent','guided','77','7001',?,?)",
-        (ts_ago(hours=31), ts_ago(hours=30)))
+        " guided_at, last_active_at) VALUES ('@recent','guided','77','7001',?,?,?)",
+        (ts_ago(hours=31), ts_ago(hours=30), ts_ago(hours=30)))
     conn.commit()
     fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "recent"}, "roles": []}])
 

@@ -125,7 +125,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.purpose == "engagement" and not policy["engagement"]:
         print(json.dumps({"disabled": "engagement"}))
         return 0
-    if args.purpose in {"onboarding", "engagement"}:
+    # A brand with general Q&A posts engagement replies as it always did: this is the
+    # thread fallback for a nudge that could not be sent by DM, for any creator, with
+    # onboarding on or off. Without general Q&A an engagement reply is limited to a
+    # guided creator's thread. Setup does not generate that policy with engagement
+    # enabled, so this guards a hand-edited profile.
+    guarded = args.purpose == "onboarding" or (
+        args.purpose == "engagement" and not policy["general_qa"])
+    if guarded:
         onboarding = (brand.config(profile).get("onboarding") or {})
         if not onboarding.get("enabled"):
             print("ERROR: onboarding is disabled for this profile.", file=sys.stderr)

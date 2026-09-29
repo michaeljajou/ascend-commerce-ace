@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import reply  # noqa: E402
 
@@ -264,3 +266,71 @@ def test_disabled_engagement_refuses_recorded_thread_nudge_before_token_read(
     assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "engagement",
                        "--channel-id", "888", "--text", "Come back"]) == 0
     assert json.loads(capsys.readouterr().out) == {"disabled": "engagement"}
+
+
+@pytest.mark.parametrize("ace_config,creator", [
+    ({}, None),                                                        # no record at all
+    ({"onboarding": {"enabled": True}}, None),
+    ({"onboarding": {"enabled": True}}, {"onboarding_state": "collecting"}),
+    ({"onboarding": {"enabled": True}}, {"onboarding_state": "active", "tiktok": "a.tt",
+                                         "role": "creator"}),
+    ({"onboarding": {"enabled": True}}, {"onboarding_state": "nudged", "tiktok": "a.tt",
+                                         "role": "creator"}),          # unfinished rejoiner
+    ({"onboarding": {"enabled": False}}, {"onboarding_state": "pre_existing"}),
+    ({"features": {"engagement": True}, "onboarding": {"enabled": False}}, None),
+    ({"features": {"reporting": False}}, None),
+], ids=["no-config", "unknown-thread", "collecting", "active", "nudged-unfinished",
+        "onboarding-disabled", "explicit-engagement", "another-feature-disabled"])
+def test_a_general_qa_brand_posts_every_engagement_reply_main_posted(
+        tmp_path, monkeypatch, ace_config, creator):
+    """**The bug this test exists for.** ENG-299 agent review round 7 (29 Sep 2026): the
+    guard written for restricted profiles ran on every profile. This script is the thread
+    fallback when a nudge cannot be sent by DM, and `main` posted whatever it was given.
+    A brand with general Q&A and engagement enabled was refused the fallback for a creator
+    who was active, collecting, or unknown to the store, and for anyone while onboarding
+    was disabled, so a team nudge to a creator who blocks DMs reached nobody."""
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps(ace_config), encoding="utf-8")
+    (tmp_path / ".env").write_text("DISCORD_BOT_TOKEN=tok\n", encoding="utf-8")
+    if creator:
+        conn = store.connect(ace_dir / "ace.db")
+        store.upsert_creator(conn, Creator(handle="@ava", **creator))
+        store.update_onboarding(conn, "@ava", thread_id="888")
+        conn.close()
+    sent = {}
+    monkeypatch.setattr(reply, "post_reply",
+                        lambda token, cid, text, rt: sent.update(channel=cid) or {"id": "9"})
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "engagement",
+                       "--channel-id", "888", "--text", "Come say hi"]) == 0
+    assert sent["channel"] == "888"
+
+
+def test_restricted_engagement_reply_requires_onboarding_enabled(tmp_path, monkeypatch, capsys):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": {"general_qa": False, "engagement": True},
+        "onboarding": {"enabled": False},
+    }), encoding="utf-8")
+    monkeypatch.setattr(reply, "bot_token",
+                        lambda _profile: (_ for _ in ()).throw(AssertionError("token read")))
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "engagement",
+                       "--channel-id", "888", "--text", "Come back"]) == 1
+    assert "onboarding is disabled" in capsys.readouterr().err
+
+
+def test_onboarding_reply_guard_applies_with_general_qa_enabled(tmp_path, monkeypatch, capsys):
+    """The onboarding purpose did not exist on `main`, so its guard holds for every profile."""
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps({"onboarding": {"enabled": True}}),
+                                        encoding="utf-8")
+    monkeypatch.setattr(reply, "bot_token",
+                        lambda _profile: (_ for _ in ()).throw(AssertionError("token read")))
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "onboarding",
+                       "--channel-id", "555", "--text", "Wrong channel"]) == 1
+    assert "active creator onboarding thread" in capsys.readouterr().err
