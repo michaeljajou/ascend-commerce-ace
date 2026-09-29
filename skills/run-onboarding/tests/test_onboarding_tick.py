@@ -340,13 +340,14 @@ def test_engagement_enabled_keeps_a_guided_thread_when_escalation_cannot_post(
     make_profile(tmp_path, test_mode=False)                  # real 48h / 7d / 7d windows
     seed_state(tmp_path)
     conn = tick.open_db(tmp_path)
-    # complete() stamps last_active_at, so a real guided row always has one. Without it
-    # cleanup has no date and skips the row whatever states it selects.
+    # A creator who went quiet, was escalated and resolved, then finished: guided() clears
+    # last_active_at, so resolved_at is the only date cleanup could use. Without a date
+    # cleanup skips the row whatever states it selects, and the state filter goes untested.
     conn.execute(
         "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
-        " nudged_at, guided_at, last_active_at)"
+        " nudged_at, resolved_at, guided_at)"
         " VALUES ('@quiet','guided','77','7001',?,?,?,?)",
-        (ts_ago(days=11), ts_ago(days=9), ts_ago(days=8), ts_ago(days=8)))
+        (ts_ago(days=20), ts_ago(days=18), ts_ago(days=8), ts_ago(days=1)))
     conn.commit()
     fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "quiet"}, "roles": []}])
     escalations = []
@@ -363,14 +364,15 @@ def test_engagement_enabled_keeps_a_guided_thread_when_escalation_cannot_post(
 
 def test_engagement_enabled_keeps_a_guided_thread_shorter_archive_window(
         tmp_path, monkeypatch):
+    """The row guided() leaves: no last_active_at. Cleanup must not date it from guided_at."""
     make_profile(tmp_path, test_mode=False)
     set_onboarding_config(tmp_path, archive_days=1)
     seed_state(tmp_path)
     conn = tick.open_db(tmp_path)
     conn.execute(
         "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
-        " guided_at, last_active_at) VALUES ('@recent','guided','77','7001',?,?,?)",
-        (ts_ago(hours=31), ts_ago(hours=30), ts_ago(hours=30)))
+        " guided_at) VALUES ('@recent','guided','77','7001',?,?)",
+        (ts_ago(hours=31), ts_ago(hours=30)))
     conn.commit()
     fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "recent"}, "roles": []}])
 

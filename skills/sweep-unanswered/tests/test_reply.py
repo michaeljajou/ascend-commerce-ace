@@ -334,3 +334,56 @@ def test_onboarding_reply_guard_applies_with_general_qa_enabled(tmp_path, monkey
     assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "onboarding",
                        "--channel-id", "555", "--text", "Wrong channel"]) == 1
     assert "active creator onboarding thread" in capsys.readouterr().err
+
+
+def test_disabled_engagement_alone_refuses_an_engagement_reply(tmp_path, monkeypatch, capsys):
+    """General Q&A enabled, engagement disabled: a supported profile, and since the guard
+    was limited to restricted profiles this gate is all that stops the reply."""
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": {"engagement": False},
+        "onboarding": {"enabled": True},
+    }), encoding="utf-8")
+    monkeypatch.setattr(reply, "bot_token",
+                        lambda _profile: (_ for _ in ()).throw(AssertionError("token read")))
+    monkeypatch.setattr(reply, "post_reply",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("posted")))
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", "engagement",
+                       "--channel-id", "888", "--text", "Come say hi"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"disabled": "engagement"}
+
+
+@pytest.mark.parametrize("purpose", ["support", "onboarding", "engagement"])
+@pytest.mark.parametrize("features", [
+    {"general_qa": "false"}, {"unknown": False}, ["engagement"], None,
+], ids=["string-value", "unknown-name", "list", "null"])
+def test_malformed_policy_refuses_every_reply(tmp_path, monkeypatch, capsys, purpose, features):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": features,
+        "onboarding": {"enabled": True},
+    }), encoding="utf-8")
+    monkeypatch.setattr(reply, "bot_token",
+                        lambda _profile: (_ for _ in ()).throw(AssertionError("token read")))
+    monkeypatch.setattr(reply, "post_reply",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("posted")))
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--purpose", purpose,
+                       "--channel-id", "888", "--text", "Hello"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err.startswith("ERROR: ")
+
+
+def test_unreadable_sidecar_refuses_every_reply(tmp_path, monkeypatch, capsys):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(reply, "bot_token",
+                        lambda _profile: (_ for _ in ()).throw(AssertionError("token read")))
+
+    assert reply.main(["--profile-dir", str(tmp_path), "--channel-id", "888",
+                       "--text", "Hello"]) == 1
+    assert "cannot read brand.json" in capsys.readouterr().err

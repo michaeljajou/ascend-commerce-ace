@@ -699,12 +699,15 @@ def merge_config(config_path: str | Path, spec: dict) -> dict:
     prior_onboarding_channel = (prior_ace.get("onboarding") or {}).get("channel_id")
     prior_guild = str((prior_ace.get("discord") or {}).get("guild_id") or "")
     existing["ace"] = build_config(spec)
-    guidance = load_onboarding_guidance(path.parent)
     onboarding = existing["ace"]["onboarding"]
-    if onboarding.get("enabled") and not existing["ace"]["features"]["general_qa"]:
-        guidance = require_onboarding_guidance(guidance)
-    if guidance:
-        existing["ace"]["onboarding"]["guidance"] = guidance
+    if not existing["ace"]["features"]["general_qa"]:
+        # Only a profile without general Q&A uses compiled guidance. A brand with it keeps
+        # the config it had: setup does not open its knowledge file or add this block.
+        guidance = load_onboarding_guidance(path.parent)
+        if onboarding.get("enabled"):
+            guidance = require_onboarding_guidance(guidance)
+        if guidance:
+            onboarding["guidance"] = guidance
     if prior_onboarding_channel and prior_guild == str(spec["discord"]["guild_id"]):
         existing["ace"]["onboarding"]["channel_id"] = prior_onboarding_channel
     elif prior_onboarding_channel:

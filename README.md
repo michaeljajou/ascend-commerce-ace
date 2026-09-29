@@ -70,9 +70,10 @@ Then attach the brand's credentials and configure Ace inside that profile:
 
 The brand team never touches Hermes — they keep the brand's **`knowledge.yaml`** current (brief, FAQ,
 commission/payment, sample process, campaigns, compliance, onboarding guidance) in the profile. It's
-read live by `get-knowledge`; general edits take effect on the next read. Setup copies only the
-bounded onboarding guidance into the generated profile, so re-run setup after changing the
-onboarding sections.
+read live by `get-knowledge`; general edits take effect on the next read. For an onboarding-only
+profile, setup copies only the bounded onboarding guidance into the generated profile, so re-run
+setup after changing the onboarding sections. Setup does not read the file for a profile with
+general Q&A enabled.
 
 Each brand spec may set boolean `features.general_qa`, `features.moderation`,
 `features.announcements`, `features.engagement`, and `features.reporting`. Omitted settings default

@@ -561,7 +561,7 @@ def test_full_feature_profile_with_a_complete_onboarding_section_keeps_prior_gui
     monkeypatch.setenv("ACE_DATA_DIR", str(data_dir))
 
     ace_config = json.loads(Path(written["brand_json"]).read_text(encoding="utf-8"))
-    assert ace_config["onboarding"]["guidance"]["how_to_reach_team"]   # section is complete
+    assert "guidance" not in ace_config["onboarding"]    # `main` wrote none, so neither does this
     assert onboarding.completion_guidance_context(tmp_path) == {
         "guidance": {},
         "guidance_mode": "legacy_full_feature",
@@ -610,13 +610,35 @@ def test_setup_compiles_only_onboarding_guidance_into_profile_artifacts(tmp_path
     data_dir.mkdir()
     (data_dir / "knowledge.yaml").write_text(yaml.safe_dump(knowledge), encoding="utf-8")
 
-    written = setup.write_profile(make_spec(), tmp_path)
+    written = setup.write_profile(
+        make_spec(features={name: False for name in setup.FEATURE_NAMES}), tmp_path)
     yaml_ace = yaml.safe_load(Path(written["config"]).read_text())["ace"]
     json_ace = json.loads(Path(written["brand_json"]).read_text())
     expected = knowledge["onboarding"]
     assert yaml_ace["onboarding"]["guidance"] == expected
     assert json_ace["onboarding"]["guidance"] == expected
     assert "faq" not in json.dumps(json_ace["onboarding"]["guidance"])
+
+
+def test_re_enabling_general_qa_removes_the_compiled_guidance(tmp_path):
+    import yaml
+
+    knowledge = {"onboarding": {
+        "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
+        "getting_started": ["Introduce yourself in #introductions."],
+        "how_to_reach_team": "Message the Agency Team in #help-desk.",
+    }}
+    (tmp_path / "ace").mkdir()
+    (tmp_path / "ace" / "knowledge.yaml").write_text(yaml.safe_dump(knowledge), encoding="utf-8")
+    setup.write_profile(
+        make_spec(features={name: False for name in setup.FEATURE_NAMES}), tmp_path)
+
+    written = setup.write_profile(make_spec(), tmp_path)
+
+    yaml_ace = yaml.safe_load(Path(written["config"]).read_text())["ace"]
+    json_ace = json.loads(Path(written["brand_json"]).read_text())
+    assert "guidance" not in yaml_ace["onboarding"]
+    assert "guidance" not in json_ace["onboarding"]
 
 
 def test_write_profile_sets_ace_data_dir_in_env(tmp_path):

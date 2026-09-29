@@ -339,12 +339,13 @@ reminders target `discord:1402018857715109991`. Gateway DOWN, brand paused.
    `python3 skills/get-knowledge/scripts/get.py --section brand` with the
    profile's `ACE_DATA_DIR`. If general Q&A is disabled, verify that this command returns
    `{"disabled": "general_qa"}` without printing knowledge.
-4. Re-run `setup.py` after the knowledge file is in place. Setup copies only
-   `onboarding.channels`, `onboarding.getting_started`, and
+4. Onboarding-only profiles: re-run `setup.py` after the knowledge file is in place. Setup
+   copies only `onboarding.channels`, `onboarding.getting_started`, and
    `onboarding.how_to_reach_team` into `ace.onboarding.guidance`. That bounded copy is the
    only knowledge exposed after onboarding when general Q&A is disabled. Re-run setup
-   whenever those onboarding sections change. A profile with general Q&A enabled keeps its
-   prior completion guidance, grounded in samples and the live campaign.
+   whenever those onboarding sections change. For a profile with general Q&A enabled, setup
+   does not read the knowledge file or write `ace.onboarding.guidance`; it keeps its prior
+   completion guidance, grounded in samples and the live campaign.
 
 **Verify:** For general Q&A profiles, BOTH paths: the venv (parsed) path returns a slice
 on-topic and EMPTY off-topic (the escalate signal), and the sandbox path (uid 10000,

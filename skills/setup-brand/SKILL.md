@@ -113,13 +113,14 @@ The brand's knowledge is a **`knowledge.yaml`** file the team maintains in the p
 (brief, FAQ, commission, samples, compliance, campaigns, …). It's read live by `get-knowledge` —
 there is no ingest/embedding step.
 
-For onboarding, setup reads only `onboarding.channels`, `onboarding.getting_started`, and
-`onboarding.how_to_reach_team` from that file. It copies those values into
-`ace.onboarding.guidance`. This bounded copy is the only knowledge available to an onboarding-only
-agent after completion. Re-run setup after changing those onboarding sections. Other knowledge
-edits still apply to `get-knowledge` on the next read when general Q&A is enabled. A profile with
-general Q&A enabled gets the same copy but keeps its prior completion guidance, grounded in
-samples and the live campaign; the copy changes nothing for it.
+For an onboarding-only profile, setup reads only `onboarding.channels`,
+`onboarding.getting_started`, and `onboarding.how_to_reach_team` from that file. It copies those
+values into `ace.onboarding.guidance`. This bounded copy is the only knowledge available to an
+onboarding-only agent after completion. Re-run setup after changing those onboarding sections.
+
+For a profile with general Q&A enabled, setup does not open the knowledge file and writes no
+`ace.onboarding.guidance`. Knowledge edits apply to `get-knowledge` on the next read, and
+completion guidance stays grounded in samples and the live campaign.
 
 ## Procedure
 1. Gather the spec (ask the operator, or read a config file).
