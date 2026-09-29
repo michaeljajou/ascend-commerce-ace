@@ -659,6 +659,7 @@ def test_unknown_creator_context_exposes_the_exact_configured_redirect(conn, mon
 def test_completion_returns_bounded_profile_guidance_without_reading_yaml(conn, tmp_path, monkeypatch):
     monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "ace"))
     brand.write_sidecar(tmp_path, {
+        "features": {"general_qa": False},          # compiled guidance is the restricted flow
         "onboarding": {"guidance": {
             "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
             "getting_started": ["Introduce yourself."],
@@ -676,6 +677,31 @@ def test_completion_returns_bounded_profile_guidance_without_reading_yaml(conn, 
     assert out["guidance_mode"] == "compiled"
     assert out["guidance"]["channels"][0]["channel"] == "#start-here"
     assert out["guidance"]["how_to_reach_team"].startswith("Ask the Agency Team")
+
+
+def test_full_feature_completion_keeps_the_prior_guidance_flow(conn, tmp_path, monkeypatch):
+    """**The bug this test exists for.** ENG-299 agent review round 4 (29 Sep 2026): a
+    full-feature brand whose knowledge file has an onboarding section was handed compiled
+    guidance, which tells the agent to skip the samples and live-campaign guidance it gave
+    before. Compiled guidance is for profiles with general Q&A disabled."""
+    monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "ace"))
+    brand.write_sidecar(tmp_path, {
+        "onboarding": {"guidance": {
+            "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
+            "getting_started": ["Introduce yourself."],
+            "how_to_reach_team": "Ask the Agency Team in #help-desk.",
+        }}
+    })
+    onboarding.start(conn, "@ava", now=100.0)
+    store.update_onboarding(conn, "@ava", discord_id="42")
+    onboarding.answer(conn, "@ava", "ava.tt")
+    onboarding.answer(conn, "@ava", "skip")
+
+    out = onboarding.answer(conn, "@ava", "skip")
+
+    assert out["next_step"] == "guidance"
+    assert out["guidance_mode"] == "legacy_full_feature"
+    assert out["guidance"] == {}
 
 
 def test_context_exposes_only_the_current_onboarding_step(conn):

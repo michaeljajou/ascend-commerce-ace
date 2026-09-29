@@ -209,6 +209,57 @@ def test_render_soul_locks_disabled_functions_and_onboarding_redirects():
     assert "onboarding.enabled is false" in soul
 
 
+GENERAL_QA_RULES = (
+    "the support agent for",
+    "help creators with",
+    "## Brand Scope",
+    "## Escalation",
+    "escalate-to-team",
+    "Never leave a real creator question unanswered",
+    "see Escalation below",
+    "Answer only from grounded knowledge-base results",
+    "Brand logistics → answer from KB",
+    "including brand-scope answers",
+)
+
+
+def onboarding_only_soul():
+    fixture = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "synthetic-agency"
+    spec = json.loads((fixture / "brand.json").read_text(encoding="utf-8"))
+    spec["onboarding"]["enabled"] = True
+    return setup.render_soul(spec)
+
+
+@pytest.mark.parametrize("rule", GENERAL_QA_RULES)
+def test_restricted_soul_carries_no_answer_classify_or_escalate_rule(rule):
+    """**The bug this test exists for.** ENG-299 agent review round 4 (29 Sep 2026): the
+    onboarding-only SOUL added a paragraph forbidding answers and escalations, and still
+    rendered the unconditional rules that demand them. DMs and mentions load only the
+    SOUL, so nothing but this text stops a model answering from its own knowledge."""
+    assert rule not in onboarding_only_soul()
+    assert rule not in setup.render_soul(make_spec(features={"general_qa": False}))
+
+
+def test_restricted_soul_states_what_outranks_what():
+    soul = onboarding_only_soul()
+    assert "overrides the channel behavior map and every skill instruction" in soul
+    assert "Only the OVERRIDE section below ranks above it" in soul
+    assert "gets its rejection, not this reply" in soul
+    assert '"I can\'t help with that."' in soul                  # security boundary kept
+    assert "Never answer a general question" in soul
+    assert "follow the run-onboarding skill" in soul           # clarification and hand-off stay
+    assert "<!--" not in soul
+
+
+@pytest.mark.parametrize("rule", GENERAL_QA_RULES)
+def test_general_qa_soul_keeps_its_answer_and_escalation_rules(rule):
+    for spec in (make_spec(), make_spec(features={"reporting": False})):
+        soul = setup.render_soul(spec)
+        assert rule in soul
+        assert "Never answer a general question" not in soul
+        assert "<!--" not in soul
+
+
 def test_render_soul_includes_the_exact_configured_onboarding_redirect():
     spec = make_spec(
         features={name: False for name in setup.FEATURE_NAMES},
@@ -401,6 +452,51 @@ def test_legacy_full_feature_profile_without_bounded_guidance_keeps_prior_guidan
         encoding="utf-8"
     )
     assert "legacy_full_feature" in skill
+
+
+def test_full_feature_profile_with_a_complete_onboarding_section_keeps_prior_guidance_path(
+    tmp_path, monkeypatch
+):
+    """**The bug this test exists for.** ENG-299 agent review round 4 (29 Sep 2026): the
+    guidance mode was chosen by whether compiled guidance existed, not by policy. The
+    shipped knowledge template has a complete onboarding section, so an unchanged
+    full-feature brand switched to compiled guidance on its next setup run and the skill
+    then skipped the samples and live-campaign guidance it gave before."""
+    template = Path(__file__).resolve().parents[1] / "templates" / "knowledge.template.yaml"
+    data_dir = tmp_path / "ace"
+    data_dir.mkdir()
+    (data_dir / "knowledge.yaml").write_text(
+        template.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    spec = make_spec(onboarding={"enabled": True})
+    assert "features" not in spec
+
+    written = setup.write_profile(spec, tmp_path)
+    monkeypatch.setenv("ACE_DATA_DIR", str(data_dir))
+
+    ace_config = json.loads(Path(written["brand_json"]).read_text(encoding="utf-8"))
+    assert ace_config["onboarding"]["guidance"]["how_to_reach_team"]   # section is complete
+    assert onboarding.completion_guidance_context(tmp_path) == {
+        "guidance": {},
+        "guidance_mode": "legacy_full_feature",
+    }
+
+
+def test_restricted_profile_with_the_same_section_uses_compiled_guidance(tmp_path, monkeypatch):
+    template = Path(__file__).resolve().parents[1] / "templates" / "knowledge.template.yaml"
+    data_dir = tmp_path / "ace"
+    data_dir.mkdir()
+    (data_dir / "knowledge.yaml").write_text(
+        template.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    spec = make_spec(features={"general_qa": False}, onboarding={"enabled": True})
+
+    setup.write_profile(spec, tmp_path)
+    monkeypatch.setenv("ACE_DATA_DIR", str(data_dir))
+
+    context = onboarding.completion_guidance_context(tmp_path)
+    assert context["guidance_mode"] == "compiled"
+    assert set(context["guidance"]) == {"channels", "getting_started", "how_to_reach_team"}
 
 
 def test_onboarding_only_activation_requires_complete_bounded_guidance(tmp_path):

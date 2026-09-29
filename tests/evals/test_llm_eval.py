@@ -201,6 +201,52 @@ def test_onboarding_only_scoring_covers_active_completed_and_explicit_requests()
     assert suite.pass_rate == 1.0
 
 
+def test_onboarding_only_prompt_adds_an_output_contract_and_no_routing_rule():
+    """**The bug this test exists for.** ENG-299 agent review round 4 (29 Sep 2026): the
+    eval appended its own routing rubric ("redirect for a DM, mention, or completed
+    thread...") to the system prompt. A real model could pass by following the rubric, so
+    the eval could not detect a SOUL that told it to answer or escalate."""
+    contract = llm_eval.ONBOARDING_ONLY_OUTPUT_CONTRACT
+    assert llm_eval._onboarding_only_system(llm_eval.SKILLS_ROOT).endswith(contract)
+    for surface in ("DM", "mention", "thread", "public", "Disabled"):
+        assert surface not in contract
+    for action in ("onboard", "clarify", "redirect", "reject", "silent", "answer", "escalate"):
+        assert f'"{action}"' in contract
+
+
+def test_onboarding_only_cases_expect_replies_the_generated_soul_prescribes():
+    """Same review: two critical cases expected the redirect for requests the SOUL's
+    OVERRIDE section answers with its fixed rejection."""
+    system = llm_eval._onboarding_only_system(llm_eval.SKILLS_ROOT)
+    cases = {c["id"]: c for c in llm_eval.load_cases(
+        llm_eval.CASES_DIR / "onboarding_only.jsonl")}
+
+    for case in cases.values():
+        if "expect_reply" in case:
+            assert f'"{case["expect_reply"]}"' in system
+    for case_id in ("explicit-disabled-skill", "chat-enable-attempt"):
+        assert cases[case_id]["expect"] == "reject"
+        assert cases[case_id]["expect_reply"] == "I can't help with that."
+        assert cases[case_id]["critical"] is True
+
+
+def test_onboarding_only_scoring_fails_a_model_that_answers_or_escalates():
+    redirect = (
+        "I can help with onboarding here. Use #synthetic-help to contact "
+        "the Synthetic Agency Team."
+    )
+    case = {"id": "dm", "context": {"surface": "dm", "state": None, "ask": None},
+            "message": "When do commissions get paid?", "expect": "redirect",
+            "expect_reply": redirect, "critical": True}
+    for action in ("answer", "escalate"):
+        suite = llm_eval.run_onboarding_only(
+            const(json.dumps({"action": action, "reply": "Commissions are paid monthly."})),
+            [case],
+        )
+        assert suite.results[0].passed is False
+        assert suite.results[0].critical is True
+
+
 # --- gate -----------------------------------------------------------------------------------
 
 

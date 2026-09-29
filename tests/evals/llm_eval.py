@@ -160,6 +160,22 @@ def _moderation_system(skills_root: Path) -> str:
     )
 
 
+# What the model must return, and nothing about which action fits which message: that has
+# to come from the generated SOUL and the bound skill, or the eval scores its own rubric.
+# "answer" and "escalate" are offered so a model following a stale rule can fail.
+ONBOARDING_ONLY_OUTPUT_CONTRACT = (
+    "Decide how Ace handles the one message, using only the instructions above and the "
+    "supplied ONBOARDING CONTEXT. Report the decision as one action: "
+    '"onboard" runs the onboarding answer step, "clarify" explains the current onboarding '
+    'question, "redirect" sends the fixed onboarding reply, "reject" sends the OVERRIDE '
+    'rejection, "silent" sends nothing, "answer" answers the question, and "escalate" '
+    "hands it to the team. For redirect and reject, copy the exact reply text from the "
+    "instructions above into reply.\n"
+    'Respond ONLY with JSON: {"action": "onboard" | "clarify" | "redirect" | "reject" | '
+    '"silent" | "answer" | "escalate", "reply": "<exact reply text, or empty>"}'
+)
+
+
 def _onboarding_only_system(skills_root: Path) -> str:
     """Generated restricted SOUL plus the skill bound to the onboarding channel."""
     setup_scripts = skills_root / "setup-brand" / "scripts"
@@ -179,13 +195,8 @@ def _onboarding_only_system(skills_root: Path) -> str:
         soul
         + "\n\n--- BOUND SKILL ---\n\n"
         + load_skill_body("run-onboarding", skills_root)
-        + "\n\nDecide how Ace handles one message using the supplied ONBOARDING CONTEXT. "
-        "The action must be onboard for an answer to the active field, clarify only for a "
-        "question about that field, redirect for a DM, mention, or completed thread outside "
-        "onboarding, and silent for an ordinary public message. Disabled skills stay disabled.\n"
-        'For redirect, copy the exact configured reply from SOUL.md into reply. '
-        'Respond ONLY with JSON: {"action": "onboard" | "clarify" | "redirect" | "silent", '
-        '"reply": "<exact redirect text, or empty>"}'
+        + "\n\n--- OUTPUT ---\n\n"
+        + ONBOARDING_ONLY_OUTPUT_CONTRACT
     )
 
 

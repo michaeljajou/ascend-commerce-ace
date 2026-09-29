@@ -73,11 +73,11 @@ tell whoever asked that onboarding is currently disabled.
 
 Once `answer` reports they're complete, follow its `guidance_mode`:
 
-- `compiled`: use only the returned `guidance` object. It contains the bounded `channels`,
-  `getting_started`, and `how_to_reach_team` values compiled from the profile knowledge file.
-  Do not call `get-knowledge` or `get-campaigns`.
-- `legacy_full_feature`: this is an existing full-feature profile with general Q&A enabled and
-  no compiled onboarding section. Preserve its prior guidance flow: explain the key channels from
+- `compiled`: general Q&A is disabled for this profile. Use only the returned `guidance`
+  object. It contains the bounded `channels`, `getting_started`, and `how_to_reach_team` values
+  compiled from the profile knowledge file. Do not call `get-knowledge` or `get-campaigns`.
+- `legacy_full_feature`: general Q&A is enabled for this profile, whether or not its knowledge
+  file has an onboarding section. Preserve its prior guidance flow: explain the key channels from
   the SOUL channel directory, use `get-knowledge --section samples` for sample setup, use
   `get-campaigns` for what is active, explain how to get help, and ask them to introduce
   themselves. Restricted profiles never use this mode. Missing compiled guidance fails closed

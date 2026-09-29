@@ -78,7 +78,7 @@ def test_answer_completes_a_full_turn_without_pyyaml(profile, no_pyyaml, monkeyp
 def test_completion_guidance_comes_from_the_json_sidecar_without_pyyaml(
     profile, no_pyyaml, monkeypatch
 ):
-    brand.write_sidecar(profile, {"onboarding": {"guidance": {
+    brand.write_sidecar(profile, {"features": {"general_qa": False}, "onboarding": {"guidance": {
         "channels": [{"channel": "#start-here", "purpose": "Begin here"}],
         "getting_started": ["Introduce yourself."],
         "how_to_reach_team": "Use #help-desk.",

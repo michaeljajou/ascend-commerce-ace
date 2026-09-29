@@ -107,7 +107,9 @@ For onboarding, setup reads only `onboarding.channels`, `onboarding.getting_star
 `onboarding.how_to_reach_team` from that file. It copies those values into
 `ace.onboarding.guidance`. This bounded copy is the only knowledge available to an onboarding-only
 agent after completion. Re-run setup after changing those onboarding sections. Other knowledge
-edits still apply to `get-knowledge` on the next read when general Q&A is enabled.
+edits still apply to `get-knowledge` on the next read when general Q&A is enabled. A profile with
+general Q&A enabled gets the same copy but keeps its prior completion guidance, grounded in
+samples and the live campaign; the copy changes nothing for it except the redirect text.
 
 ## Procedure
 1. Gather the spec (ask the operator, or read a config file).

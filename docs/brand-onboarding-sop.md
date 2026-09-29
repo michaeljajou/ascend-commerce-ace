@@ -341,7 +341,8 @@ reminders target `discord:1402018857715109991`. Gateway DOWN, brand paused.
    `onboarding.channels`, `onboarding.getting_started`, and
    `onboarding.how_to_reach_team` into `ace.onboarding.guidance`. That bounded copy is the
    only knowledge exposed after onboarding when general Q&A is disabled. Re-run setup
-   whenever those onboarding sections change.
+   whenever those onboarding sections change. A profile with general Q&A enabled keeps its
+   prior completion guidance, grounded in samples and the live campaign.
 
 **Verify:** For general Q&A profiles, BOTH paths: the venv (parsed) path returns a slice
 on-topic and EMPTY off-topic (the escalate signal), and the sandbox path (uid 10000,

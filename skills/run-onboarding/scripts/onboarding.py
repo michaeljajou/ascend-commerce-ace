@@ -246,22 +246,29 @@ def next_field(row: dict) -> str | None:
 
 
 def completion_guidance_context(profile: Path | None = None) -> dict:
-    """Select compiled guidance or the compatible full-feature lookup path."""
+    """Select the guidance flow by policy, never by what happens to be compiled.
+
+    A brand with general Q&A keeps the flow it always had: guidance grounded in its
+    samples and live campaign. Setup compiles the knowledge file's onboarding section for
+    every profile, and the shipped template has one, so its presence must not move such a
+    brand onto the bounded guidance. That is for profiles with general Q&A disabled,
+    which fail closed when any part of it is missing.
+    """
     profile = profile or brand.profile_dir()
     policy = brand.load_policy(profile)
+    if policy["general_qa"]:
+        return {"guidance": {}, "guidance_mode": "legacy_full_feature"}
     guidance = ((brand.config(profile).get("onboarding") or {}).get("guidance")) or {}
     if not isinstance(guidance, dict):
         guidance = {}
     allowed = ("channels", "getting_started", "how_to_reach_team")
     bounded = {key: guidance[key] for key in allowed if key in guidance}
     missing = [key for key in allowed if not bounded.get(key)]
-    if not missing:
-        return {"guidance": bounded, "guidance_mode": "compiled"}
-    if not policy["general_qa"]:
+    if missing:
         raise brand.PolicyError(
             "restricted onboarding guidance is unavailable; missing: " + ", ".join(missing)
         )
-    return {"guidance": {}, "guidance_mode": "legacy_full_feature"}
+    return {"guidance": bounded, "guidance_mode": "compiled"}
 
 
 def completion_guidance(profile: Path | None = None) -> dict:
