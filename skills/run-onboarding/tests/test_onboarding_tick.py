@@ -319,6 +319,105 @@ def test_engagement_disabled_still_archives_completed_threads(tmp_path, monkeypa
     assert ("/channels/7001", {"archived": True, "locked": False}, "PATCH") in fakes.writes
 
 
+ARCHIVE_7001 = ("/channels/7001", {"archived": True, "locked": False}, "PATCH")
+
+
+def set_onboarding_config(tmp_path, **values):
+    cfg_path = tmp_path / "config.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["ace"]["onboarding"].update(values)
+    cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+
+def test_engagement_enabled_keeps_a_guided_thread_when_escalation_cannot_post(
+        tmp_path, monkeypatch):
+    """**The bug this test exists for.** ENG-299 agent review round 6 (29 Sep 2026): thread
+    cleanup was widened to the guided state for every profile, to close threads where
+    engagement is disabled. On `main` only active and resolved threads are archived. A
+    brand with engagement enabled lost the thread of a creator whose nudge was already
+    spent and whose escalation could not post, and with it the thread fallback for a
+    later nudge."""
+    make_profile(tmp_path, test_mode=False)                  # real 48h / 7d / 7d windows
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute(
+        "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
+        " nudged_at, guided_at) VALUES ('@quiet','guided','77','7001',?,?,?)",
+        (ts_ago(days=11), ts_ago(days=9), ts_ago(days=8)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "quiet"}, "roles": []}])
+    fakes.slack = lambda token, method, payload: {"ok": False, "error": "channel_not_found"}
+
+    run_tick(tmp_path, monkeypatch, fakes)
+
+    row = db_row(tmp_path, "@quiet")
+    assert row["onboarding_state"] == "guided" and row["thread_id"] == "7001"
+    assert ARCHIVE_7001 not in fakes.writes
+
+
+def test_engagement_enabled_keeps_a_guided_thread_shorter_archive_window(
+        tmp_path, monkeypatch):
+    make_profile(tmp_path, test_mode=False)
+    set_onboarding_config(tmp_path, archive_days=1)
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute(
+        "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
+        " guided_at) VALUES ('@recent','guided','77','7001',?,?)",
+        (ts_ago(hours=31), ts_ago(hours=30)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "recent"}, "roles": []}])
+
+    run_tick(tmp_path, monkeypatch, fakes)
+
+    row = db_row(tmp_path, "@recent")
+    assert row["onboarding_state"] == "guided" and row["thread_id"] == "7001"
+    assert ARCHIVE_7001 not in fakes.writes
+
+
+def test_engagement_enabled_does_not_date_an_active_thread_from_guidance(
+        tmp_path, monkeypatch):
+    """`main` dates cleanup from resolved_at or last_active_at only."""
+    make_profile(tmp_path, test_mode=False)
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute(
+        "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
+        " guided_at) VALUES ('@legacy','active','77','7001',?,?)",
+        (ts_ago(days=30), ts_ago(days=29)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "legacy"}, "roles": []}])
+
+    run_tick(tmp_path, monkeypatch, fakes)
+
+    assert db_row(tmp_path, "@legacy")["thread_id"] == "7001"
+    assert ARCHIVE_7001 not in fakes.writes
+
+
+def test_engagement_enabled_still_archives_active_and_resolved_threads(tmp_path, monkeypatch):
+    make_profile(tmp_path, test_mode=False)
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute(
+        "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
+        " guided_at, last_active_at) VALUES ('@active','active','77','7001',?,?,?)",
+        (ts_ago(days=30), ts_ago(days=29), ts_ago(days=8)))
+    conn.execute(
+        "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
+        " resolved_at) VALUES ('@resolved','resolved','78','7002',?,?)",
+        (ts_ago(days=30), ts_ago(days=8)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "active"}, "roles": []},
+                              {"user": {"id": "78", "username": "resolved"}, "roles": []}])
+
+    run_tick(tmp_path, monkeypatch, fakes)
+
+    assert db_row(tmp_path, "@active")["thread_id"] is None
+    assert db_row(tmp_path, "@resolved")["thread_id"] is None
+    assert ARCHIVE_7001 in fakes.writes
+    assert ("/channels/7002", {"archived": True, "locked": False}, "PATCH") in fakes.writes
+
+
 def test_quiet_creator_gets_nudge_wake_once(tmp_path, monkeypatch):
     make_profile(tmp_path)                                               # test_mode: nudge at 3 min
     seed_state(tmp_path)

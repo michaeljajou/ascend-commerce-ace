@@ -78,18 +78,24 @@ def main(argv: list[str] | None = None) -> int:
 
     profile = Path(args.profile_dir)
     try:
-        if not brand.feature_enabled("engagement", profile):
-            print(json.dumps({"disabled": "engagement"}))
-            return 0
+        policy = brand.load_policy(profile)
     except brand.PolicyError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
-    if not (brand.config(profile).get("onboarding") or {}).get("enabled"):
-        print("ERROR: onboarding is disabled for this profile.", file=sys.stderr)
-        return 1
-    if not is_guided_creator(profile, args.user_id):
-        print("ERROR: engagement DMs require a guided creator record.", file=sys.stderr)
-        return 1
+    if not policy["engagement"]:
+        print(json.dumps({"disabled": "engagement"}))
+        return 0
+    if not policy["general_qa"]:
+        # A brand with general Q&A sends the DMs it always sent: nudges where onboarding
+        # is off, ad-hoc nudges from the team. Without general Q&A, outreach is limited
+        # to a creator who finished onboarding. Setup does not generate that policy with
+        # engagement enabled, so this guards a hand-edited profile.
+        if not (brand.config(profile).get("onboarding") or {}).get("enabled"):
+            print("ERROR: onboarding is disabled for this profile.", file=sys.stderr)
+            return 1
+        if not is_guided_creator(profile, args.user_id):
+            print("ERROR: engagement DMs require a guided creator record.", file=sys.stderr)
+            return 1
 
     text = (sys.stdin.read() if args.stdin else args.text or "").strip()
     if not text:

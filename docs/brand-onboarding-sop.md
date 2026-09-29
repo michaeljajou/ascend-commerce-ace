@@ -541,8 +541,13 @@ bot view+history+read OK on all engaged channels, Send everywhere except `challe
    `assign_role.py --remove`, park test threads.
 
 **Verify:** the applicable path above is observed for real; `onboarding.py trace --handle
-@<test>` shows the completed run; the creator receives only the bounded channels,
-getting-started steps, and human-help destination; no FAILED enabled cron rows exist.
+@<test>` shows the completed run; no FAILED enabled cron rows exist. The completion guidance
+depends on the profile:
+- General Q&A enabled: the creator receives the key channels, how to request samples, what
+  is running right now from the live campaign, how to get help, and a nudge to introduce
+  themselves.
+- Onboarding-only: the creator receives only the bounded channels, getting-started steps,
+  and human-help destination.
 
 **Live run:** 🔄 2026-08-04 I Am Joy — operator chose to launch directly in PROD mode
 (no test-mode: it only compresses the two onboarding timers, and the happy path +

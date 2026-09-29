@@ -619,13 +619,22 @@ def main(argv: list[str] | None = None) -> int:
                         archive_thread(token, r["thread_id"])
                     print(f"onboarding: {r['handle']} resolved via ✅.", file=sys.stderr)
 
-        # 5. archive closed-out threads after the configured window
+        # 5. archive closed-out threads after the configured window. With engagement
+        # disabled nothing moves a guided creator on to active, so their thread closes
+        # from the guidance stamp. With it enabled the lifecycle is unchanged: only
+        # active and resolved threads close, dated from their own stamps.
         archive_after = timedelta(days=float(ob.get("archive_days", 7)))
+        closed_states = ("active", "resolved") if engagement_enabled else (
+            "guided", "active", "resolved")
         for r in conn.execute(
-            """SELECT handle, thread_id, last_active_at, resolved_at, guided_at FROM creators
-               WHERE thread_id IS NOT NULL AND onboarding_state IN ('guided','active','resolved')"""
+            f"""SELECT handle, thread_id, last_active_at, resolved_at, guided_at FROM creators
+               WHERE thread_id IS NOT NULL
+               AND onboarding_state IN ({",".join("?" * len(closed_states))})""",
+            closed_states,
         ).fetchall():
-            anchor = r["resolved_at"] or r["last_active_at"] or r["guided_at"]
+            anchor = r["resolved_at"] or r["last_active_at"]
+            if not engagement_enabled:
+                anchor = anchor or r["guided_at"]
             if anchor and now - datetime.fromtimestamp(float(anchor), tz=timezone.utc) >= archive_after:
                 archive_thread(token, r["thread_id"])
                 upd(conn, r["handle"], thread_id=None)
