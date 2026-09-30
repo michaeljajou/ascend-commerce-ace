@@ -641,7 +641,7 @@ def test_disabling_one_other_feature_does_not_compile_guidance(disabled, tmp_pat
 
 
 def test_a_prepared_onboarding_only_profile_needs_no_knowledge_file(tmp_path):
-    """SOP Step 6 runs setup before the knowledge file exists; only activation needs it."""
+    """SOP Step 4 runs setup before the knowledge file exists; only activation needs it."""
     spec = make_spec(features={name: False for name in setup.FEATURE_NAMES})
     assert "onboarding" not in spec                     # prepared: onboarding.enabled false
 

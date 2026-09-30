@@ -353,7 +353,8 @@ on-topic and EMPTY off-topic (the escalate signal), and the sandbox path (uid 10
 emptiness there). For onboarding-only profiles, setup activates onboarding
 (`onboarding.enabled: true`) only when the generated `ace.onboarding.guidance` contains channels,
 getting-started steps, and a human-help destination; a prepared profile (`onboarding.enabled:
-false`) sets up without a knowledge file.
+false`) sets up without a knowledge file, and still reads one that is present (a partial
+section is copied as far as it goes; invalid YAML fails setup).
 
 **Live run:** ✅ 2026-08-04 I Am Joy — staged file copied in, hermes-owned; venv:
 commission query returned the FAQ slice, "wifi password" returned empty; sandbox as
