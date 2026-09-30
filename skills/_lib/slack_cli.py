@@ -160,7 +160,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
     else:
         onboarding = ace.get("onboarding") or {}
-        if not onboarding.get("enabled"):
+        # A brand with general Q&A posts what it always posted: the sidecar read here can
+        # lag a switch flipped in config.yaml by hand. Only a restricted profile, always
+        # activated through setup, is held to the switch.
+        if not policy["general_qa"] and not onboarding.get("enabled"):
             print("ERROR: onboarding is disabled for this profile.", file=sys.stderr)
             return 1
         allowed_channels = {

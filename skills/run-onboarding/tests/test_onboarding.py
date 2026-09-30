@@ -138,8 +138,14 @@ def test_disabled_onboarding_cli_refuses_before_opening_store(
 
 @pytest.mark.parametrize("argv", [
     ["start", "--handle", "@flipper"],
+    ["answer", "--handle", "@flipper", "--text", "@flip_tt"],
+    ["set", "--handle", "@flipper", "--tiktok", "@flip_tt"],
+    ["retry", "--handle", "@flipper"],
+    ["complete", "--handle", "@flipper"],
+    ["guided", "--handle", "@flipper"],
+    ["flag", "--handle", "@flipper"],
     ["context", "--handle", "@flipper"],
-])
+], ids=lambda argv: argv[0])
 def test_a_general_qa_brand_runs_the_creator_flow_whatever_the_sidecar_switch_says(
         argv, tmp_path, monkeypatch, capsys):
     """**The bug this test exists for.** ENG-299 regression review (30 Sep 2026): the
@@ -154,12 +160,15 @@ def test_a_general_qa_brand_runs_the_creator_flow_whatever_the_sidecar_switch_sa
     (tmp_path / "config.yaml").write_text(
         "ace:\n  onboarding:\n    enabled: true\n", encoding="utf-8")
     monkeypatch.setenv("ACE_DATA_DIR", str(ace_dir))
+    onboarding.main(["start", "--handle", "@flipper"])  # the row the tick creates
+    onboarding.main(["set", "--handle", "@flipper", "--tiktok", "@flip_tt"])
+    capsys.readouterr()
 
     assert onboarding.main(argv) == 0
 
     out = __import__("json").loads(capsys.readouterr().out)
     assert "disabled" not in out
-    assert out["handle"] == "@flipper"                  # the command ran, as on `main`
+    assert store.get_creator(store.connect(), "@flipper") is not None   # the store was used
 
 
 def test_stats_shape(conn):

@@ -117,6 +117,37 @@ def test_onboarding_post_requires_enabled_policy_and_configured_channel(
     assert "configured onboarding Slack channel" in capsys.readouterr().err
 
 
+def test_a_general_qa_brand_posts_onboarding_messages_whatever_the_sidecar_switch_says(
+        tmp_path, monkeypatch):
+    """**The bug this test exists for.** ENG-299 agent review round 12 (30 Sep 2026): an
+    onboarding post was refused whenever the sidecar's `onboarding.enabled` was false. Only
+    setup rewrites the sidecar, so a brand whose switch was flipped in `config.yaml` had
+    its creators completed with no signup card, no role-failure alert and no stuck alert,
+    all of which `main` posted."""
+    make_profile(tmp_path, onboarding={"enabled": False, "data_channel": "#ace-onboarding"})
+
+    rc, calls = run(tmp_path, monkeypatch, [
+        "post", "--purpose", "onboarding", "--channel", "#ace-onboarding", "--text", "signup",
+    ])
+    assert rc == 0 and calls["channel"] == "#ace-onboarding"
+
+    rc, calls = run(tmp_path, monkeypatch, ["post", "--purpose", "onboarding", "--text", "stuck"])
+    assert rc == 0 and calls["channel"] == "#ace-escalations"      # the brand's own channel
+
+
+def test_a_restricted_profile_with_onboarding_off_refuses_an_onboarding_post(
+        tmp_path, monkeypatch, capsys):
+    make_profile(tmp_path, features={"general_qa": False},
+                 onboarding={"enabled": False, "data_channel": "#ace-onboarding"})
+
+    rc, calls = run(tmp_path, monkeypatch, [
+        "post", "--purpose", "onboarding", "--channel", "#ace-onboarding", "--text", "signup",
+    ])
+
+    assert rc == 1 and calls == {}
+    assert "onboarding is disabled" in capsys.readouterr().err
+
+
 # --- Discord/GitHub markdown → Slack mrkdwn ---------------------------------------------
 # QA, 2026-07-23: the sweep's creative-strategist escalation reached Slack as literal
 # "**Channel:** <#1522268317321138176>" — Slack bolds single stars and can't render a

@@ -696,7 +696,8 @@ def main(argv: list[str] | None = None) -> int:
         # A brand with general Q&A has no script-level switch, as on `main`: its skill text
         # reads `ace.onboarding.enabled`, which an operator may flip in config.yaml by hand
         # (admin-commands) without setup rewriting the sidecar this script reads. Only a
-        # restricted profile, always activated through setup, is gated here.
+        # restricted profile, always activated through setup, is gated here. slack_cli
+        # applies the same rule to the posts these commands send.
         if (not policy["general_qa"]
                 and not (brand.config(profile).get("onboarding") or {}).get("enabled")):
             print(json.dumps({"disabled": "onboarding"}))
