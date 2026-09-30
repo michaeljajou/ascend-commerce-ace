@@ -136,6 +136,32 @@ def test_disabled_onboarding_cli_refuses_before_opening_store(
     assert __import__("json").loads(capsys.readouterr().out) == {"disabled": "onboarding"}
 
 
+@pytest.mark.parametrize("argv", [
+    ["start", "--handle", "@flipper"],
+    ["context", "--handle", "@flipper"],
+])
+def test_a_general_qa_brand_runs_the_creator_flow_whatever_the_sidecar_switch_says(
+        argv, tmp_path, monkeypatch, capsys):
+    """**The bug this test exists for.** ENG-299 regression review (30 Sep 2026): the
+    creator-flow commands refused whenever the sidecar's `onboarding.enabled` was false.
+    Only setup rewrites the sidecar, while the tick reads `config.yaml`, so a brand whose
+    switch was flipped by editing `config.yaml` (the `admin-commands` path) opened
+    onboarding threads and then answered every creator with `{"disabled": "onboarding"}`.
+    `main` had no script-level switch for such a brand: its skill text decides."""
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    brand.write_sidecar(tmp_path, {"onboarding": {"enabled": False}})     # no `features`
+    (tmp_path / "config.yaml").write_text(
+        "ace:\n  onboarding:\n    enabled: true\n", encoding="utf-8")
+    monkeypatch.setenv("ACE_DATA_DIR", str(ace_dir))
+
+    assert onboarding.main(argv) == 0
+
+    out = __import__("json").loads(capsys.readouterr().out)
+    assert "disabled" not in out
+    assert out["handle"] == "@flipper"                  # the command ran, as on `main`
+
+
 def test_stats_shape(conn):
     onboarding.start(conn, "@a", now=1.0)
     onboarding.retry(conn, "@a")
