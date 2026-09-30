@@ -80,11 +80,47 @@ errors, and a members-list API call failing with `Missing Access` means the inte
   FULL_ACTIVE / MONITOR_ONLY / PAID_COLLAB / AMBASSADOR / INACTIVE)
 - `slack_channel`, optional `growi_project`
 - `model` (answer model), optional `classify_model`, `voice`, `brand_name`
+- optional `features` object with boolean keys `general_qa`, `moderation`, `announcements`,
+  `engagement`, and `reporting`. Omitted keys default to `true`, so existing specs keep the
+  legacy behavior.
+
+An onboarding-only profile disables every optional feature:
+```
+"features": {
+  "general_qa": false,
+  "moderation": false,
+  "announcements": false,
+  "engagement": false,
+  "reporting": false
+},
+"onboarding": {"enabled": false}
+```
+Keep onboarding disabled until the profile is ready for live creator joins. Setting all five
+feature values to false does not disable onboarding.
+
+Supported combinations:
+- `moderation`, `announcements`, `engagement`, and `reporting` can each be disabled on their
+  own, in any mix, while `general_qa` stays enabled.
+- `general_qa` can be disabled only in the onboarding-only profile above, with the other four
+  disabled too. Setup rejects `general_qa: false` with any other feature enabled, including
+  one left out of the spec, and writes nothing.
+- While an onboarding-only profile has `onboarding.enabled: false`, its SOUL tells the agent to
+  stay silent for every message. The onboarding and team-help redirect applies once
+  onboarding is enabled.
 
 ## Brand knowledge
 The brand's knowledge is a **`knowledge.yaml`** file the team maintains in the profile's data dir
 (brief, FAQ, commission, samples, compliance, campaigns, …). It's read live by `get-knowledge` —
 there is no ingest/embedding step.
+
+For an onboarding-only profile, setup reads only `onboarding.channels`,
+`onboarding.getting_started`, and `onboarding.how_to_reach_team` from that file. It copies those
+values into `ace.onboarding.guidance`. This bounded copy is the only knowledge available to an
+onboarding-only agent after completion. Re-run setup after changing those onboarding sections.
+
+For a profile with general Q&A enabled, setup does not open the knowledge file and writes no
+`ace.onboarding.guidance`. Knowledge edits apply to `get-knowledge` on the next read, and
+completion guidance stays grounded in samples and the live campaign.
 
 ## Procedure
 1. Gather the spec (ask the operator, or read a config file).
@@ -97,8 +133,10 @@ there is no ingest/embedding step.
    merges **`ACE_DATA_DIR=<profile>/ace`** into the profile `.env`. That env var is the bundle's
    orchestrator-agnostic data-dir contract — `store.py` and `get-knowledge` read only `ACE_DATA_DIR`;
    this skill is the one place that maps Hermes' profile path onto it.
-3. Activate the cron jobs (accept blueprint suggestions or register from `cronjobs.yaml`).
-   The **sweep-unanswered** job is the reply-gating half of the mention-only gateway — register
+3. Activate only the cron jobs listed in the generated `cronjobs.yaml`. The effective feature map
+   removes jobs for disabled functions. An onboarding-only profile contains only
+   `onboarding-tick`. Do not register a missing job from a skill blueprint or another profile.
+   When present, **sweep-unanswered** is the reply-gating half of the mention-only gateway. Register
    it with its zero-token pre-script (the script gates the agent; a tick with nothing to do
    never touches the LLM):
    ```
@@ -143,20 +181,45 @@ there is no ingest/embedding step.
       `hermes --profile <brand> cron edit <job_id> --deliver discord:<id>`.
     Restart the gateway once more after this step.
 4. Ensure the brand's **`knowledge.yaml`** is present in the data dir (`<profile>/ace`, = `ACE_DATA_DIR`),
-   then validate it loads:
+   then validate it loads when general Q&A is enabled:
    ```
    python ${HERMES_SKILL_DIR}/../get-knowledge/scripts/get.py --section brand
    ```
+   For a profile with general Q&A disabled, the command must return
+   `{"disabled": "general_qa"}`. Re-run setup and inspect `ace.onboarding.guidance` in
+   `config.yaml` instead. Setup refuses to activate restricted onboarding unless all three bounded
+   guidance sections are present.
 5. Verify (next section).
+
+## Changing a live profile's feature policy
+1. Pause the selected profile's gateway and cron jobs. Do not pause other profiles.
+2. Edit the selected profile's saved spec, then re-run setup. This refreshes `config.yaml`,
+   `ace/brand.json`, `SOUL.md`, copied scripts, and `cronjobs.yaml` from one resolved policy.
+3. Inspect `hermes --profile <brand> cron list --all`. Pause or remove obsolete Ace jobs that are
+   absent from the generated file. Create or edit only the jobs present in that file. Preserve
+   unrelated jobs. The synthetic registered-job fixture and pure reconciliation test exercise
+   this comparison without changing live scheduler state.
+4. Restart the selected gateway and reset or refresh its existing sessions so cached support
+   instructions cannot continue using a disabled feature.
+5. Resume only the generated Ace jobs that should run for this profile.
+
+To roll back, restore the previous feature values in the saved spec and repeat the same procedure.
+Do not treat a manual edit to `config.yaml` or `ace/brand.json` as an active or complete rollout.
 
 ## Pitfalls
 - The profile MUST exist first; this skill configures it, it doesn't create it.
 - `MONITOR_ONLY` channels are read for sentiment but **never** replied to publicly — confirm the
   monitor wiring in the Phase 0 spike.
 - Re-running is safe: config/SOUL/cron are overwritten from the spec.
-- Knowledge is just a YAML file edited in the profile — no refresh/ingest needed; edits apply on next read.
+- General knowledge edits apply on the next read. Changes to bounded onboarding guidance require a
+  setup re-run.
 
 ## Verification
 - `config.yaml` scoping lists match the intended channel map (free_response / ignored / monitor / post_targets).
 - `SOUL.md` contains the brand voice and the never-fabricate + classify rules.
-- `get-knowledge` returns the `brand` section and a known FAQ phrase; an off-topic query returns empty.
+- `config.yaml` and `ace/brand.json` contain the same fully resolved feature map.
+- `cronjobs.yaml` contains no job for a disabled feature; onboarding-only contains only
+  `onboarding-tick`.
+- When general Q&A is enabled, `get-knowledge` returns the `brand` section and a known FAQ phrase;
+  an off-topic query returns empty. When it is disabled, the same support call returns the disabled
+  result without reading the knowledge file.

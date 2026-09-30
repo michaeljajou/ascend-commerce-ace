@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
 
-from _lib import moderation, store  # noqa: E402
+from _lib import brand, moderation, store  # noqa: E402
 
 HOUR = 3600.0
 
@@ -60,6 +60,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--channel")
     ap.add_argument("--lookback-h", type=float, default=24)
     args = ap.parse_args(argv)
+
+    try:
+        if not brand.feature_enabled("moderation"):
+            print(json.dumps({"disabled": "moderation"}))
+            return 0
+    except brand.PolicyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     conn = store.connect()
     print(json.dumps(run_moderate(conn, args.handle, args.category, args.channel, args.lookback_h)))

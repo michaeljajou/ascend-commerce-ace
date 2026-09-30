@@ -1,5 +1,8 @@
+import json
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import get  # noqa: E402
@@ -51,3 +54,36 @@ def test_main_without_pyyaml_prints_raw_knowledge(tmp_path, monkeypatch, capsys)
     out = capsys.readouterr().out
     assert rc == 0
     assert "Glow Labs" in out and "how do i start" in out   # whole raw doc, not empty
+
+
+def test_disabled_general_qa_refuses_before_reading_knowledge(tmp_path, monkeypatch, capsys):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(
+        json.dumps({"features": {"general_qa": False}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(get.knowledge, "load_knowledge",
+                        lambda *_args: (_ for _ in ()).throw(AssertionError("knowledge read")))
+    monkeypatch.setenv("ACE_DATA_DIR", str(ace_dir))
+
+    assert get.main(["--query", "payment status"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"disabled": "general_qa"}
+
+
+def test_enabled_engagement_cannot_bypass_disabled_general_qa(tmp_path, monkeypatch, capsys):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(json.dumps({
+        "features": {"general_qa": False, "engagement": True}
+    }), encoding="utf-8")
+    monkeypatch.setattr(get.knowledge, "load_knowledge",
+                        lambda *_args: (_ for _ in ()).throw(AssertionError("knowledge read")))
+    monkeypatch.setenv("ACE_DATA_DIR", str(ace_dir))
+
+    assert get.main(["--query", "commission"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"disabled": "general_qa"}
+
+
+def test_cli_rejects_a_cross_profile_policy_override(tmp_path):
+    with pytest.raises(SystemExit):
+        get.main(["--profile-dir", str(tmp_path), "--query", "commission"])

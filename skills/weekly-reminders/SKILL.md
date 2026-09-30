@@ -18,13 +18,18 @@ metadata:
 Fully automated nudges to participate in the active campaign/challenge. Twice weekly, no human in
 the loop — the details come live from the brand's launch channels.
 
+## Feature policy
+Use this skill only when `ace.features.announcements` is enabled. The posting script validates the
+policy before reading or writing Discord. A stale cron invocation or explicit skill request cannot
+override the policy.
+
 ## When to Use
 On the blueprint schedule (Mon & Thu by default), as the `weekly-reminders` cron job.
 
 ## Procedure
 1. Pull the current campaign/challenge live from Discord (newest team post = active):
    ```
-   python3 ${HERMES_SKILL_DIR}/../get-campaigns/scripts/fetch.py
+   python3 ${HERMES_SKILL_DIR}/../get-campaigns/scripts/fetch.py --purpose announcements
    ```
 2. Compose a short reminder (name, theme, how to participate, deadline, prizes) **using only**
    facts from the `active` posts. Under 2000 characters. No date/data recap, no "here's the

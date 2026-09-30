@@ -49,10 +49,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
 
-from _lib import store, trace  # noqa: E402
+from _lib import brand, store, trace  # noqa: E402
 from _lib.models import Creator  # noqa: E402
 
 NEW, COLLECTING, COMPLETE = "new", "collecting", "complete"
+ONBOARDING_REDIRECT = brand.DEFAULT_ONBOARDING_REDIRECT
 
 # Where captured creator details land for the team (override per brand with
 # ace.onboarding.data_channel). Separate from #ace-escalations so signups stay
@@ -244,6 +245,66 @@ def next_field(row: dict) -> str | None:
     return None
 
 
+def completion_guidance_context(profile: Path | None = None) -> dict:
+    """Select the guidance flow by policy, never by what happens to be compiled.
+
+    A brand with general Q&A keeps the flow it always had: guidance grounded in its
+    samples and live campaign. Setup compiles the knowledge file's onboarding section for
+    every profile, and the shipped template has one, so its presence must not move such a
+    brand onto the bounded guidance. That is for profiles with general Q&A disabled,
+    which fail closed when any part of it is missing.
+    """
+    profile = profile or brand.profile_dir()
+    policy = brand.load_policy(profile)
+    if policy["general_qa"]:
+        return {"guidance": {}, "guidance_mode": "legacy_full_feature"}
+    guidance = ((brand.config(profile).get("onboarding") or {}).get("guidance")) or {}
+    if not isinstance(guidance, dict):
+        guidance = {}
+    allowed = ("channels", "getting_started", "how_to_reach_team")
+    bounded = {key: guidance[key] for key in allowed if key in guidance}
+    missing = [key for key in allowed if not bounded.get(key)]
+    if missing:
+        raise brand.PolicyError(
+            "restricted onboarding guidance is unavailable; missing: " + ", ".join(missing)
+        )
+    return {"guidance": bounded, "guidance_mode": "compiled"}
+
+
+def completion_guidance(profile: Path | None = None) -> dict:
+    """The bounded onboarding section compiled into brand.json by setup-brand."""
+    return completion_guidance_context(profile)["guidance"]
+
+
+def _completed(row: dict) -> bool:
+    """This lifecycle finished, not merely a creator Ace remembers."""
+    return store.onboarding_completed(row)
+
+
+def configured_redirect(profile: Path | None = None) -> str:
+    """The exact redirect compiled into the profile sidecar and generated SOUL."""
+    return brand.onboarding_redirect(brand.config(profile))
+
+
+def conversation_context(conn, handle: str) -> dict:
+    redirect = configured_redirect()
+    row = store.get_onboarding(conn, handle)
+    if row is None:
+        return {"handle": handle, "state": None, "error": "not found",
+                "outside_scope": redirect}
+    field = None if _completed(row) else next_field(row)
+    out = {
+        "handle": handle,
+        "state": row.get("onboarding_state"),
+        "ask": field,
+        "question": FIELD_PROMPTS.get(field),
+        "outside_scope": redirect,
+    }
+    if _completed(row):
+        out.update(completion_guidance_context())
+    return out
+
+
 def latest_creator_message(thread_id: str) -> str | None:
     """The newest non-bot message in a creator's onboarding thread, read from Discord.
 
@@ -312,6 +373,23 @@ def answer(conn, handle: str, text: str | None = None, now: float | None = None)
     if row is None:
         start(conn, handle, now=now)
         row = store.get_onboarding(conn, handle) or {}
+    if _completed(row):
+        guidance_context = completion_guidance_context()
+        out = {
+            "ok": True,
+            "handle": handle,
+            "state": row.get("onboarding_state"),
+            "ask": None,
+            "already_complete": True,
+            **guidance_context,
+        }
+        if guidance_context["guidance_mode"] == "legacy_full_feature":
+            # A brand with general Q&A answers a creator it already onboarded, as before.
+            out["next_step"] = "answer"
+        else:
+            out["next_step"] = "redirect"
+            out["redirect"] = configured_redirect()
+        return out
 
     source = "argument"
     if not (text or "").strip():
@@ -349,8 +427,10 @@ def answer(conn, handle: str, text: str | None = None, now: float | None = None)
 
 def _finish(conn, handle: str, now: float | None) -> dict:
     """Everything asked — assign roles and hand the details to the team."""
-    done = complete(conn, handle, now=now)
-    return {**done, "ask": None,
+    guidance_context = completion_guidance_context()
+    guidance = guidance_context["guidance"]
+    done = complete(conn, handle, now=now, _guidance=guidance)
+    return {**done, "ask": None, **guidance_context,
             "next_step": "guidance" if done.get("ok") else "hand off to the team"}
 
 
@@ -369,7 +449,7 @@ def retry(conn, handle: str, ensure: Creator | None = None) -> dict:
 
 
 def complete(conn, handle: str, role: str = "Creator", now: float | None = None,
-             assign_roles: bool = True) -> dict:
+             assign_roles: bool = True, _guidance: dict | None = None) -> dict:
     """Finish onboarding: grant the Discord roles, then hand the details to the team.
 
     Roles come FIRST and are the gate. With the access gate on they are the creator's key
@@ -381,8 +461,14 @@ def complete(conn, handle: str, role: str = "Creator", now: float | None = None,
         raise ValueError(f"unknown creator {handle!r}; run start first")
     if not c.tiktok:
         raise ValueError("cannot complete onboarding without a tiktok username")
+    if _guidance is None:
+        completion_guidance()
     # email and phone are OPTIONAL — creators may say "skip" for either
     row = store.get_onboarding(conn, handle) or {}
+    if _completed(row):
+        return {"ok": True, "handle": handle, "state": row.get("onboarding_state"),
+                "role": row.get("role"), "assigned": [], "already_complete": True,
+                "posted_to_slack": False, "sheet_synced": False}
 
     assigned: list[str] = []
     if assign_roles:
@@ -489,7 +575,8 @@ def _post(text: str, key: str, default: str | None = None) -> bool:
 
     ace = sheet.brand_config()
     channel = (ace.get("onboarding") or {}).get(key) or default
-    argv = ["post", "--text", text] + (["--channel", channel] if channel else [])
+    argv = ["post", "--purpose", "onboarding", "--text", text]
+    argv += (["--channel", channel] if channel else [])
     try:
         return slack_cli.main(argv) == 0
     except Exception:  # noqa: BLE001 - see docstring
@@ -564,7 +651,7 @@ def set_test_mode(profile_dir: Path, on: bool) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Creator onboarding state + team controls.")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("start", "answer", "set", "retry", "complete", "guided", "flag", "status",
+    for name in ("start", "answer", "set", "retry", "complete", "guided", "flag", "status", "context",
                  "reset", "resolve"):
         p = sub.add_parser(name)
         p.add_argument("--handle", required=True)
@@ -596,6 +683,26 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(events, indent=2) if args.json else trace.render(events))
         return 0
 
+    creator_flow_commands = {
+        "start", "answer", "set", "retry", "complete", "guided", "flag", "context",
+    }
+    if args.cmd in creator_flow_commands:
+        profile = brand.profile_dir()
+        try:
+            policy = brand.load_policy(profile)
+        except brand.PolicyError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        # A brand with general Q&A has no script-level switch, as on `main`: its skill text
+        # reads `ace.onboarding.enabled`, which an operator may flip in config.yaml by hand
+        # (admin-commands) without setup rewriting the sidecar this script reads. Only a
+        # restricted profile, always activated through setup, is gated here. slack_cli
+        # applies the same rule to the posts these commands send.
+        if (not policy["general_qa"]
+                and not (brand.config(profile).get("onboarding") or {}).get("enabled")):
+            print(json.dumps({"disabled": "onboarding"}))
+            return 0
+
     conn = store.connect()
     handlers = {
         "start": lambda: start(conn, args.handle),
@@ -606,6 +713,7 @@ def main(argv: list[str] | None = None) -> int:
         "guided": lambda: guided(conn, args.handle),
         "flag": lambda: flag(conn, args.handle),
         "status": lambda: status(conn, args.handle),
+        "context": lambda: conversation_context(conn, args.handle),
         "reset": lambda: reset(conn, args.handle),
         "resolve": lambda: resolve(conn, args.handle),
         "stats": lambda: store.onboarding_stats(conn),

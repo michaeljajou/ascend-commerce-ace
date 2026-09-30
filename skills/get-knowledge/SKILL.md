@@ -15,13 +15,19 @@ The brand's knowledge is a single structured **YAML file** in the profile (brief
 samples, compliance, campaigns, …) maintained by the team. This skill hands you the relevant slice
 so you can answer accurately — and **never fabricate**.
 
+## Feature policy
+This grounding helper does not grant permission to answer a question. Use it for creator support
+only when `ace.features.general_qa` is enabled. During onboarding-only operation, `run-onboarding`
+uses the bounded guidance already compiled into `ace.onboarding.guidance`; it does not call this
+skill or read arbitrary knowledge sections.
+
 ## When to Use
 - Inside `answer-from-kb`, before answering any logistics question.
 - Any time you need a brand fact (commission, sample process, deadlines, policy, current campaign).
 
 ## Quick Reference
 ```
-python ${HERMES_SKILL_DIR}/scripts/get.py --query "<the creator's question>"   # relevant subset
+python ${HERMES_SKILL_DIR}/scripts/get.py --query "<the creator's question>"
 python ${HERMES_SKILL_DIR}/scripts/get.py --section commission                  # one section
 python ${HERMES_SKILL_DIR}/scripts/get.py                                       # whole doc (small)
 ```

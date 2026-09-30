@@ -1,0 +1,62 @@
+{
+  "brand_id": "legacy-brand",
+  "brand_name": "Legacy Brand",
+  "classify_model": "anthropic/claude-haiku-4-5",
+  "discord": {
+    "channels": {
+      "ambassadors": "AMBASSADOR",
+      "announcements": "POST_ONLY",
+      "campaigns": "POST_ANSWER",
+      "community-chat": "FULL_ACTIVE",
+      "content-inspo": "INACTIVE",
+      "our-products": "ANSWER",
+      "paid-collabs": "PAID_COLLAB",
+      "success-stories": "MONITOR_ONLY"
+    },
+    "guild_id": "200000000000000002",
+    "home_channel": "agent-ace",
+    "scoping": {
+      "free_response": [
+        "ambassadors",
+        "campaigns",
+        "community-chat",
+        "our-products",
+        "paid-collabs"
+      ],
+      "ignored": [
+        "announcements",
+        "content-inspo"
+      ],
+      "monitor": [
+        "success-stories"
+      ],
+      "post_targets": [
+        "announcements",
+        "campaigns"
+      ]
+    },
+    "sweep_minutes": 15,
+    "team_role": "Legacy Team"
+  },
+  "growi_project": "legacy-project",
+  "knowledge_file": "knowledge.yaml",
+  "onboarding": {
+    "archive_days": 7,
+    "creator_roles": [
+      "onboarded",
+      "creator"
+    ],
+    "data_channel": "#legacy-onboarding",
+    "enabled": true,
+    "escalate_days": 7,
+    "max_retries": 3,
+    "nudge_hours": 48,
+    "nudge_via": "dm",
+    "staff_role": "Legacy Team",
+    "test_escalate_minutes": 8,
+    "test_mode": false,
+    "test_nudge_minutes": 3,
+    "welcome_message": "Welcome to Legacy Brand!"
+  },
+  "slack_channel": "#legacy-ops"
+}

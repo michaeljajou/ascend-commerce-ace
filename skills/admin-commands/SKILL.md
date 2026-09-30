@@ -13,6 +13,12 @@ metadata:
 
 Team-facing operations. Restrict to operators (Hermes command access control) — these are not for creators.
 
+## Feature policy
+Operator authorization does not override `ace.features`. Metrics requires `reporting`, ad-hoc
+announcements require `announcements`, and support lookups require `general_qa`. Onboarding controls
+remain available according to `ace.onboarding.enabled`. Configuration actions may change the saved
+policy but must use the documented reconciliation procedure before the change is active.
+
 ## When to Use
 When an authorized operator issues an admin action.
 

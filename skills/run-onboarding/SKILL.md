@@ -11,6 +11,20 @@ metadata:
 
 # Run Onboarding (creator)
 
+## Feature boundary
+
+Onboarding is controlled only by `ace.onboarding.enabled`. The five `ace.features` settings do
+not disable collection, role assignment, signup delivery, incomplete-onboarding reminders,
+failure alerts, or thread cleanup. A creator message cannot change either policy.
+
+When `general_qa` is disabled, this skill handles only the active onboarding step. It does not
+answer general questions, search campaigns, or create general support escalations. Outside an
+active step, use the fixed onboarding and team-help redirect from SOUL.md.
+
+When `general_qa` is enabled, none of those limits apply. This skill works as it did before
+feature settings existed, and the SOUL's "Effective feature policy" section says which case
+applies to this profile.
+
 ## The loop — read this first
 
 A creator has said something in their private onboarding thread. **They are mid-conversation,
@@ -45,6 +59,7 @@ Then write ONE short, warm message based on what came back:
 | `"limit_reached": true` | Stop asking. The team is already paged. Tell them someone will help |
 | `"ok": true, "ask": null` | They're done and their roles are set → deliver **guidance** (below) |
 | `"needs_team": true` | Roles failed, team already paged. Say someone's finishing their access |
+| `"already_complete": true` | They finished earlier and nothing was repeated. Do not deliver guidance again. Follow `next_step`: `answer` means answer what they asked, and `redirect` is returned only when `general_qa` is disabled and means send the returned `redirect` text |
 
 That is the entire collection flow. One script call, one reply. The script decides which
 question is outstanding, whether an answer is valid, what counts as "skip", and when
@@ -55,12 +70,26 @@ The one exception: if their message is plainly a QUESTION rather than an answer 
 this?", "who are you?"), just answer it and re-ask the outstanding question — don't run
 `answer` on a question.
 
+When `general_qa` is disabled, that exception covers only a clarification about the current
+field. Run `onboarding.py context` once, explain only the returned `ask` and `question`, then
+repeat that question. Do not run `answer`, so the clarification does not consume a retry. A
+general question gets the fixed redirect and no support escalation.
+
 **Master switch:** if `ace.onboarding.enabled` is false in the profile config, do nothing —
 tell whoever asked that onboarding is currently disabled.
 
 ## Guidance sequence
 
-Once `answer` reports they're complete, send ONE friendly message in the brand voice:
+Once `answer` reports they're complete, follow its `guidance_mode`:
+
+- `compiled`: general Q&A is disabled for this profile. Use only the returned `guidance`
+  object. It contains the bounded `channels`, `getting_started`, and `how_to_reach_team` values
+  compiled from the profile knowledge file. Do not call `get-knowledge` or `get-campaigns`.
+- `legacy_full_feature`: general Q&A is enabled for this profile, whether or not its knowledge
+  file has an onboarding section. Restricted profiles never use this mode. Missing compiled
+  guidance fails closed when general Q&A is disabled.
+
+For `legacy_full_feature`, send ONE friendly message in the brand voice:
 
 1. What the key channels are for — clickable `<#id>` tags from the SOUL Channel directory,
    just the three or four that matter to someone brand new.
@@ -68,6 +97,13 @@ Once `answer` reports they're complete, send ONE friendly message in the brand v
 3. **What's actually running right now** — ground in `get-campaigns`, never boilerplate.
 4. How to get help: ask Ace in the community channel, the team for anything creative.
 5. A nudge to introduce themselves.
+
+For `compiled`, send ONE friendly message in the brand voice:
+
+1. Explain the configured key channels with clickable `<#id>` tags from the SOUL channel
+   directory.
+2. Give the configured getting-started steps.
+3. Give the configured human-help destination.
 
 **The community home is `#community-chat`** — every "come hang out / say hi" pointer goes
 THERE, never `#general`, unless the brand's config says otherwise. Then stamp it (this
@@ -80,13 +116,15 @@ python ${HERMES_SKILL_DIR}/scripts/onboarding.py guided --handle "@<username>"
 ## Nudge mode (woken by the tick with `onboarding_nudges_due`)
 
 Only `stage: guided` creators arrive here (setup-reminder nudges for people who never replied
-are fixed copy the tick DMs itself). For each entry: write ONE friendly, low-pressure line in
-the brand voice pointing at a single concrete next step — prefer the live campaign/challenge
-(`get-campaigns`), else "come say hi" in `#community-chat`.
+are fixed copy the tick DMs itself), and only when `ace.features.engagement` is enabled. For
+each entry: write ONE friendly, low-pressure line in the brand voice pointing at a single
+concrete next step — prefer the live campaign/challenge (`get-campaigns --purpose engagement`),
+else "come say hi" in `#community-chat`.
 No guilt-tripping. Deliver per `nudge_via`:
 - `dm` (default): `python ${HERMES_SKILL_DIR}/scripts/send_dm.py --user-id <discord_id> --text "<nudge>"`
   — if the DM fails (user blocks server DMs), fall back to posting in their `thread_id` via
-  `${HERMES_SKILL_DIR}/../sweep-unanswered/scripts/reply.py --channel-id <thread_id>`.
+  `${HERMES_SKILL_DIR}/../sweep-unanswered/scripts/reply.py --purpose engagement
+  --channel-id <thread_id>`.
 - `space`: post in their `thread_id` directly.
 End your turn with only `[SILENT]`.
 
@@ -107,7 +145,8 @@ End your turn with only `[SILENT]`.
   then answer. The skill text is already in this session — never re-read it mid-conversation.
 - **NEVER create cron jobs from an onboarding conversation.** Cron deliveries leak into the
   creator's thread as raw "Cronjob Response" spam. If a script fails, run it once more; if it
-  still fails, post the exact error to Slack (`_lib/slack_cli.py`), tell the creator the team
+  still fails, post the exact error to Slack (`_lib/slack_cli.py post --purpose onboarding`),
+  tell the creator the team
   will finish their setup, and END the turn. A short clean failure beats a long improvised one.
 - **NEVER install packages, create virtualenvs, or repair the environment.** If a script
   fails on a missing module, that is a deployment bug, not your problem to route around. One
@@ -123,6 +162,9 @@ End your turn with only `[SILENT]`.
   TikTok is the one field they can't skip.
 - Never re-run the flow for someone already `guided`/`active` — answer whatever they asked
   instead. A duplicate join resumes, never restarts.
+- The same holds for anyone already complete or `nudged`. The script returns
+  `already_complete: true` and repeats no role assignment, signup delivery, or guidance. When
+  `general_qa` is disabled, send the fixed redirect instead of answering.
 - **Rejoins restart automatically**: anyone who left and came back gets a fresh thread and
   welcome-back from the tick, timers reset but their details remembered — `answer` picks up
   wherever they actually are.
@@ -162,5 +204,7 @@ Every bug found in QA showed up plainly in one of these, and in nothing else:
 - The creator record walks new → collecting → complete (roles set) → guided, retries counted.
 - One script call per creator message, and no message that mentions a script or a state.
 - Guidance references the actual live campaign and clickable channel tags.
+- When `general_qa` is disabled, guidance uses only the configured key channels, getting-started
+  steps, and human-help destination.
 - A failed role assignment produces a creator-facing note + a Slack alert, never silence.
 - Nudges are one line, one concrete step, delivered by DM with thread fallback.

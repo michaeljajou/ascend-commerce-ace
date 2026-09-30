@@ -224,11 +224,17 @@ and permissions complete. Residue open: bot role `Ace` at position 1 (drag above
 1. Write the spec JSON: `brand_id`, `brand_name`, `discord.guild_id` (from Step 3),
    channel behavior map (mirror an existing brand's mapping as baseline: community-chat
    POST_ANSWER, our-products ANSWER, announcements POST_ONLY, etc.), `slack_channel`,
-   `model` (mirror the pilot-proven config), and **`onboarding.enabled: false`** — it flips
+   `model` (mirror the pilot-proven config), optional `features`, and
+   **`onboarding.enabled: false`** — it flips
    to true at go-live (Step 9). `ace.onboarding.enabled` is a LIVE switch: the fleet join
    listener rescans every profile every 60s and connects as the brand's bot the moment it
    is true, so the bot shows online and joins start onboarding threads while the gateway
    is still down (QBounce, 2026-09-10).
+   `features` accepts five booleans: `general_qa`, `moderation`, `announcements`,
+   `engagement`, and `reporting`. Omitted keys default to true for backward compatibility.
+   For onboarding-only operation, set all five to false. This does not disable onboarding.
+   `general_qa` can be disabled only that way: setup rejects `general_qa: false` while any
+   other feature is enabled or omitted. The other four can each be disabled on their own.
 2. Store the spec at `<profile>/spec.json` (documents the brand; makes re-runs one
    command), then run `python skills/setup-brand/scripts/setup.py --spec
    <profile>/spec.json --profile-dir <profile>` (via the Hermes venv in the container).
@@ -328,13 +334,27 @@ reminders target `discord:1402018857715109991`. Gateway DOWN, brand paused.
 1. Copy the staged file: `/opt/data/staging/<brand>-knowledge.yaml` →
    `<profile>/ace/knowledge.yaml`.
 2. `chown 10000` — agent scripts run as uid 10000; a root-owned file is unreadable to them.
-3. Validate through the agent's OWN interpreter (`/usr/bin/python3`, no PyYAML — exercises
-   the raw-text fallback): `python3 skills/get-knowledge/scripts/get.py --section brand`
-   with the profile's `ACE_DATA_DIR`.
+3. If general Q&A is enabled, validate through the agent's OWN interpreter (`/usr/bin/python3`,
+   no PyYAML, which exercises the raw-text fallback):
+   `python3 skills/get-knowledge/scripts/get.py --section brand` with the
+   profile's `ACE_DATA_DIR`. If general Q&A is disabled, verify that this command returns
+   `{"disabled": "general_qa"}` without printing knowledge.
+4. Onboarding-only profiles: re-run `setup.py` after the knowledge file is in place. Setup
+   copies only `onboarding.channels`, `onboarding.getting_started`, and
+   `onboarding.how_to_reach_team` into `ace.onboarding.guidance`. That bounded copy is the
+   only knowledge exposed after onboarding when general Q&A is disabled. Re-run setup
+   whenever those onboarding sections change. For a profile with general Q&A enabled, setup
+   does not read the knowledge file or write `ace.onboarding.guidance`; it keeps its prior
+   completion guidance, grounded in samples and the live campaign.
 
-**Verify:** BOTH paths — the venv (parsed) path returns a slice on-topic and EMPTY
-off-topic (the escalate signal), and the sandbox path (uid 10000, `/usr/bin/python3`)
-prints the raw file (the no-PyYAML fallback can't subset, so never test emptiness there).
+**Verify:** For general Q&A profiles, BOTH paths: the venv (parsed) path returns a slice
+on-topic and EMPTY off-topic (the escalate signal), and the sandbox path (uid 10000,
+`/usr/bin/python3`) prints the raw file (the no-PyYAML fallback can't subset, so never test
+emptiness there). For onboarding-only profiles, setup activates onboarding
+(`onboarding.enabled: true`) only when the generated `ace.onboarding.guidance` contains channels,
+getting-started steps, and a human-help destination; a prepared profile (`onboarding.enabled:
+false`) sets up without a knowledge file, and still reads one that is present (a partial
+section is copied as far as it goes; invalid YAML fails setup).
 
 **Live run:** ✅ 2026-08-04 I Am Joy — staged file copied in, hermes-owned; venv:
 commission query returned the FAQ slice, "wifi password" returned empty; sandbox as
@@ -350,16 +370,18 @@ venv: "commission rate" returned the FAQ slice, "wifi password" empty; sandbox a
 
 **Who:** Runner.
 
-**Do:** register from the profile's `cronjobs.yaml` / blueprint suggestions. The
-non-negotiable one is **sweep-unanswered** with its zero-token pre-script gate:
+**Do:** register only the jobs in the profile's generated `cronjobs.yaml`. Disabled
+features remove their jobs from this file. An onboarding-only profile contains only
+`onboarding-tick`. Do not copy jobs from another profile or register a missing skill
+blueprint. When listed, **sweep-unanswered** uses its zero-token pre-script gate:
 ```
 hermes --profile <brand> cron create "every 2m" --name sweep-unanswered \
   --skill sweep-unanswered --script ace-sweep.py --deliver discord \
   "Handle the unanswered creator messages surfaced above, following the sweep-unanswered skill exactly. End with only [SILENT]."
 ```
-Plus daily-digest and the other blueprint jobs (mirror the pilot brand's set:
-daily-digest, nudge-inactive, sweep-unanswered, onboarding-tick, weekly-reminders).
-**weekly-reminders registers with `--deliver discord` (the home channel) since
+For a full-feature profile, the generated set is daily-digest, nudge-inactive,
+sweep-unanswered, onboarding-tick, and weekly-reminders. **weekly-reminders registers
+with `--deliver discord` (the home channel) since
 2026-09-22** — its `post.py` puts the reminder in the brand's POST_* channel itself, so a
 failed run's error summary can only reach `#agent-ace`:
 ```
@@ -393,7 +415,17 @@ scheduler reads. **Immediately `cron pause` every job** for a brand not yet live
 even with the gateway down). `cron list` hides paused jobs — use `--all`.
 
 **Verify:** `cron list --all` shows the full set paused (pre-live) or active (live);
-at go-live, force one sweep tick and confirm a quiet tick spends zero tokens.
+it matches the generated `cronjobs.yaml`; at go-live, force one enabled job and verify
+its expected no-op or output. For onboarding-only, verify that no sweep, digest,
+engagement, or announcement job is registered.
+
+The deterministic fixture `tests/fixtures/synthetic-agency/registered-cronjobs.json` and
+`test_registered_job_reconciliation_pauses_obsolete_ace_jobs_and_preserves_unrelated` cover the
+same comparison before any live command is run. The reconciliation plan keeps registered Ace
+jobs still present in `cronjobs.yaml`, pauses obsolete Ace job IDs, creates missing desired Ace
+job names, and preserves unrelated job IDs. Ace jobs include skill blueprints that setup never
+generates, such as `results-announcement`; a registered one is paused, not preserved. Apply
+that plan only to the selected profile.
 
 **Live run:** ✅ 2026-08-04 I Am Joy — five jobs registered as uid 10000 +
 HOME=/opt/data, paused within the same minute (sweep's first fire was 2 minutes out),
@@ -488,7 +520,7 @@ bot view+history+read OK on all engaged channels, Send everywhere except `challe
 
 ---
 
-## Step 9 — Smoke test (both)
+## Step 9 — Smoke test
 
 **Who:** Runner drives; Operator (or a throwaway account) plays creator.
 
@@ -500,14 +532,26 @@ bot view+history+read OK on all engaged channels, Send everywhere except `challe
 2. Fresh account joins → sees only #onboarding → private thread opens → complete the
    conversation → `onboarded`+`creator` assigned → channels appear → captured details
    posted to Slack #ace-onboarding, brand-tagged.
-3. Community QA: untagged operational question in #community-chat → sweep answers grounded
-   within ~grace+2m; creative/strategy question → silent Slack escalation, properly
-   formatted; @mention → instant reply.
+3. Follow the profile's feature policy:
+   - **General Q&A enabled:** untagged operational question in #community-chat → sweep
+     answers grounded within ~grace+2m; creative/strategy question → silent Slack
+     escalation, properly formatted; @mention → instant reply.
+   - **Onboarding-only:** ordinary public message → no action; DM or mention outside an
+     active onboarding field → fixed onboarding/human-help redirect; explicit requests
+     for disabled skills → no disabled action. Confirm campaign and general-knowledge
+     support lookups return disabled results. `cron list --all` contains only
+     `onboarding-tick` among Ace jobs.
 4. Test-mode OFF (restore real 48h/7d windows). Strip test roles with
    `assign_role.py --remove`, park test threads.
 
-**Verify:** every arrow above observed for real; `onboarding.py trace --handle @<test>`
-shows the completed run; no FAILED cron rows in the scheduler.
+**Verify:** the applicable path above is observed for real; `onboarding.py trace --handle
+@<test>` shows the completed run; no FAILED enabled cron rows exist. The completion guidance
+depends on the profile:
+- General Q&A enabled: the creator receives the key channels, how to request samples, what
+  is running right now from the live campaign, how to get help, and a nudge to introduce
+  themselves.
+- Onboarding-only: the creator receives only the bounded channels, getting-started steps,
+  and human-help destination.
 
 **Live run:** 🔄 2026-08-04 I Am Joy — operator chose to launch directly in PROD mode
 (no test-mode: it only compresses the two onboarding timers, and the happy path +
@@ -566,13 +610,16 @@ thing that can ever reach `#announcements` is the reminder itself.
 
 **Who:** Operator announces; Runner watches.
 
-**Do:** point creators at the server. For the first days: watch Slack #ace-escalations
-(each repeated escalation = the next FAQ entry to add to `knowledge.yaml` — edits apply on
-next read, no restart), read the daily digest, spot-check
-`skills/_lib/agent_trace.py --list` for failed runs.
+**Do:** point creators at the server and spot-check
+`skills/_lib/agent_trace.py --list` for failed runs. For a full-feature profile, also watch
+Slack #ace-escalations, review repeated escalation topics for knowledge updates, and read
+the daily digest. For onboarding-only, watch #ace-onboarding and onboarding-specific
+failure alerts; do not expect support escalations or a daily digest.
 
-**Verify:** first real creator onboards end-to-end without staff help; escalations arrive
-formatted and brand-tagged; digest cron green.
+**Verify:** the first real creator onboards end-to-end without staff help. For full-feature
+profiles, escalations arrive formatted and brand-tagged and the digest cron is green. For
+onboarding-only, only onboarding-tick is active and support, reporting, moderation,
+announcement, and post-completion engagement actions remain absent.
 
 **Live run:** ⏳ I Am Joy — pending.
 
@@ -603,6 +650,25 @@ During onboarding (this SOP), a new brand is fully paused by default: no gateway
 crons until Steps 5/7, `onboarding.enabled: false` until Step 9 — and the Step 5 first
 connect is deliberately brief (build directory → stop). Leave the gateway down through
 Steps 6–8 and bring it up for the Step 9 smoke test.
+
+## Ops note — changing a profile's feature policy
+
+Apply feature changes to one profile at a time:
+
+1. Pause that profile's gateway and Ace cron jobs. Do not pause other profiles.
+2. Edit its saved `spec.json`. Re-run setup so `config.yaml`, `ace/brand.json`, `SOUL.md`,
+   copied scripts, and `cronjobs.yaml` all use the same resolved feature map.
+3. Inspect `hermes --profile <brand> cron list --all`. Pause or remove obsolete Ace jobs
+   that are absent from the generated `cronjobs.yaml`. Create or edit only jobs present in
+   the generated file. Preserve unrelated jobs.
+4. Restart that profile's gateway. Reset or refresh its existing sessions so cached
+   instructions cannot continue answering, moderating, posting, engaging, or reporting
+   after the corresponding feature is disabled.
+5. Resume only the generated Ace jobs that should be active for this profile.
+
+For rollback, restore the previous feature values in `spec.json` and repeat all five
+steps. Manual edits to `config.yaml` or `ace/brand.json` are not a complete rollout because
+they leave generated instructions, copied scripts, cron registration, or sessions stale.
 
 ---
 

@@ -1,0 +1,38 @@
+[
+  {
+    "name": "daily-digest",
+    "schedule": "0 9 * * *",
+    "skill": "daily-digest",
+    "deliver": null,
+    "prompt": "Run the daily digest exactly per the daily-digest skill: ONE command (digest.py --post) \u2014 it posts to Slack itself. End with only [SILENT]."
+  },
+  {
+    "name": "nudge-inactive",
+    "schedule": "0 10 * * *",
+    "skill": "nudge-inactive",
+    "deliver": null
+  },
+  {
+    "name": "sweep-unanswered",
+    "schedule": "every 2m",
+    "skill": "sweep-unanswered",
+    "script": "ace-sweep.py",
+    "deliver": "discord",
+    "prompt": "Handle the unanswered creator messages surfaced above, following the sweep-unanswered skill exactly. End with only [SILENT]."
+  },
+  {
+    "name": "onboarding-tick",
+    "schedule": "every 2m",
+    "skill": "run-onboarding",
+    "script": "ace-onboarding-tick.py",
+    "deliver": "discord",
+    "prompt": "Send the onboarding nudges surfaced above, following the run-onboarding skill (Nudge mode) exactly. End with only [SILENT]."
+  },
+  {
+    "name": "weekly-reminders",
+    "schedule": "0 16 * * 1,4",
+    "skill": "weekly-reminders",
+    "deliver": "discord",
+    "prompt": "Post the recurring campaign/challenge reminder following the weekly-reminders skill exactly: fetch.py for the active campaign, compose the reminder, hand it to post.py on stdin. End with only [SILENT]."
+  }
+]

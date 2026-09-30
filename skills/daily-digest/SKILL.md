@@ -17,6 +17,11 @@ metadata:
 
 A once-a-day summary for the team, posted to the brand's Slack channel.
 
+## Feature policy
+Use this skill only when `ace.features.reporting` is enabled. The script validates the policy
+before reading the store or posting to Slack. A stale cron invocation or explicit skill request
+cannot override the policy.
+
 ## When to Use
 Daily at 9 AM (blueprint, delivered to Slack).
 

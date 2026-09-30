@@ -1,0 +1,10 @@
+{
+  "brand_id": "legacy-minimal",
+  "discord": {
+    "guild_id": "200000000000000003",
+    "channels": {
+      "community-chat": "FULL_ACTIVE",
+      "announcements": "POST_ONLY"
+    }
+  }
+}

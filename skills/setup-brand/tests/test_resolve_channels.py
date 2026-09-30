@@ -158,6 +158,27 @@ def test_onboarding_existing_channel_id_not_recreated(tmp_path, monkeypatch):
     assert cfg["discord"]["free_response_channels"] == "900"      # reused, not recreated
 
 
+def test_resolve_channels_keeps_json_sidecar_in_sync(tmp_path, monkeypatch):
+    make_profile(tmp_path)
+    cfg_path = tmp_path / "config.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["ace"]["features"] = {
+        name: False for name in
+        ("general_qa", "moderation", "announcements", "engagement", "reporting")
+    }
+    cfg["ace"]["onboarding"] = {"enabled": True, "channel_id": "900"}
+    cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    monkeypatch.setattr(resolve_channels, "_discord",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no REST expected")))
+
+    assert resolve_channels.main(["--profile-dir", str(tmp_path)]) == 0
+
+    sidecar = json.loads((tmp_path / "ace" / "brand.json").read_text(encoding="utf-8"))
+    written = yaml.safe_load(cfg_path.read_text())["ace"]
+    assert sidecar == written
+    assert sidecar["onboarding"]["channel_id"] == "900"
+
+
 def test_resolves_cron_delivery_targets(tmp_path, capsys):
     """weekly-reminders is written by setup.py as `discord:#<name>`; after first connect the
     directory knows the id, and only the id delivers on servers with decorated channel names."""

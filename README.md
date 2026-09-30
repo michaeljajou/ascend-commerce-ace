@@ -70,7 +70,18 @@ Then attach the brand's credentials and configure Ace inside that profile:
 
 The brand team never touches Hermes — they keep the brand's **`knowledge.yaml`** current (brief, FAQ,
 commission/payment, sample process, campaigns, compliance, onboarding guidance) in the profile. It's
-read live by `get-knowledge`; edits take effect on the next read (no ingest/refresh).
+read live by `get-knowledge`; general edits take effect on the next read. For an onboarding-only
+profile, setup copies only the bounded onboarding guidance into the generated profile, so re-run
+setup after changing the onboarding sections. Setup does not read the file for a profile with
+general Q&A enabled.
+
+Each brand spec may set boolean `features.general_qa`, `features.moderation`,
+`features.announcements`, `features.engagement`, and `features.reporting`. Omitted settings default
+to enabled for compatibility. An onboarding-only profile sets all five to false, then follows the
+feature-policy reconciliation procedure in `skills/setup-brand/SKILL.md` before activation.
+`moderation`, `announcements`, `engagement`, and `reporting` can each be disabled on their own.
+`general_qa` can be disabled only together with the other four; setup rejects any other
+combination before it writes anything.
 
 ## Develop
 
@@ -88,8 +99,9 @@ Two layers:
   against the brand `knowledge.yaml` (no model): answerable questions resolve to knowledge,
   off-topic/creative ones resolve to nothing. Runs in `pytest` every time.
 - **Live gate** (`tests/evals/`) — runs golden cases through a real model via OpenRouter, using the
-  actual `SKILL.md` instruction bodies, with an **LLM judge** for grounding faithfulness. Three
-  suites: `grounding` (never-fabricate), `classify` (HANDLE vs ROUTE), `moderation` (category).
+  actual `SKILL.md` instruction bodies, with an **LLM judge** for grounding faithfulness. Four
+  suites: `grounding` (never-fabricate), `classify` (HANDLE vs ROUTE), `moderation` (category),
+  and `onboarding_only` (restricted-profile routing and disabled-feature boundaries).
   The engine is unit-tested offline with fake models; the live run needs a key:
 
 ```bash

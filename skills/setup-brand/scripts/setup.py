@@ -27,12 +27,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
 sys.path.insert(0, str(Path(__file__).resolve().parent))      # → sibling prep_server.py
-from _lib.brand import POST_BEHAVIORS  # noqa: E402
+from _lib.brand import (  # noqa: E402
+    FEATURE_NAMES,
+    POST_BEHAVIORS,
+    onboarding_redirect,
+    resolve_features,
+)
 
 # Channel behaviors from the spec's channel map.
 BEHAVIORS = {
@@ -101,6 +107,27 @@ def _default_slack() -> str | None:
     return None
 
 
+def spec_features(spec: dict) -> dict[str, bool]:
+    """The spec's effective features, refused when no generated profile can honour them.
+
+    General Q&A can be disabled only for an onboarding-only profile. The restricted SOUL
+    tells the agent to stay silent, never to search campaigns, and that the policy
+    overrides every skill, which is wrong while moderation, announcements, engagement, or
+    reporting is still enabled. Each of those four can be disabled on its own.
+    """
+    features = resolve_features({"features": spec["features"]} if "features" in spec else {})
+    if not features["general_qa"]:
+        still_enabled = [name for name in FEATURE_NAMES
+                         if name != "general_qa" and features[name]]
+        if still_enabled:
+            raise ValueError(
+                "general_qa can be disabled only for an onboarding-only profile, with "
+                "every other feature disabled too; still enabled: "
+                + ", ".join(still_enabled)
+            )
+    return features
+
+
 def validate_spec(spec: dict) -> None:
     missing = [k for k in REQUIRED_KEYS if k not in spec]
     if missing:
@@ -111,6 +138,7 @@ def validate_spec(spec: dict) -> None:
     bad = {ch: b for ch, b in discord["channels"].items() if b not in BEHAVIORS}
     if bad:
         raise ValueError(f"invalid channel behaviors: {bad}; allowed: {sorted(BEHAVIORS)}")
+    spec_features(spec)
 
 
 def channel_scoping(channels: dict[str, str]) -> dict[str, list[str]]:
@@ -154,6 +182,7 @@ def build_config(spec: dict) -> dict:
         },
         "classify_model": d["classify_model"],
         "knowledge_file": "knowledge.yaml",  # the brand knowledge the team maintains in this profile
+        "features": spec_features(spec),
     }
     # All brands share one escalation channel by default; slack_cli.py brand-tags
     # every post so the team can tell brands apart.
@@ -200,19 +229,117 @@ def build_onboarding(spec: dict) -> dict:
     return block
 
 
-def render_soul(spec: dict, template_path: Path | None = None) -> str:
+def load_onboarding_guidance(profile: Path) -> dict | None:
+    """Read only the onboarding section that the sandboxed flow may return."""
+    data_dir = profile / "ace"
+    path = next((data_dir / name for name in ("knowledge.yaml", "knowledge.yml", "knowledge.json")
+                 if (data_dir / name).exists()), None)
+    if path is None:
+        return None
+    if path.suffix == ".json":
+        knowledge = json.loads(path.read_text(encoding="utf-8") or "{}")
+    else:
+        import yaml
+
+        knowledge = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    section = knowledge.get("onboarding") if isinstance(knowledge, dict) else None
+    if not isinstance(section, dict):
+        return None
+    allowed = ("channels", "getting_started", "how_to_reach_team")
+    return {key: section[key] for key in allowed if key in section}
+
+
+def require_onboarding_guidance(guidance: dict | None) -> dict:
+    """Require every bounded completion section for restricted onboarding profiles."""
+    required = ("channels", "getting_started", "how_to_reach_team")
+    missing = [key for key in required if not guidance or not guidance.get(key)]
+    if missing:
+        raise ValueError(
+            "onboarding guidance is required when general_qa is disabled; missing: "
+            + ", ".join(missing)
+        )
+    return guidance
+
+
+def _select_soul_blocks(template: str, general_qa: bool) -> str:
+    """Keep the template's ``general_qa`` or ``restricted`` passages, never both.
+
+    The template marks what only a question-answering brand may be told (its scope, the
+    escalation hand-off, the answer and classify rules) and what replaces it when general
+    Q&A is disabled. DMs and mentions load nothing but the SOUL, so a restricted profile
+    must not carry an instruction to answer or escalate at all. A marker on its own line
+    goes with its line break, so a general Q&A SOUL renders exactly as it did before.
+    """
+    keep, drop = ("general_qa", "restricted") if general_qa else ("restricted", "general_qa")
+    template = re.sub(rf"^<!--{drop}-->\n.*?^<!--/{drop}-->\n", "", template,
+                      flags=re.DOTALL | re.MULTILINE)
+    template = re.sub(rf"<!--{drop}-->.*?<!--/{drop}-->", "", template, flags=re.DOTALL)
+    template = re.sub(rf"^<!--/?{keep}-->\n", "", template, flags=re.MULTILINE)
+    return re.sub(rf"<!--/?{keep}-->", "", template)
+
+
+def render_soul(
+    spec: dict,
+    template_path: Path | None = None,
+    *,
+    ace_config: dict | None = None,
+) -> str:
     d = {**DEFAULTS, **spec}
     template_path = template_path or (Path(__file__).resolve().parents[1] / "templates" / "SOUL.md.tmpl")
-    tmpl = template_path.read_text(encoding="utf-8")
     summary = "\n".join(
         f"- #{ch}: {behavior}" for ch, behavior in sorted(d["discord"]["channels"].items())
     )
     slack = spec.get("slack_channel") or _default_slack() or "#ace-escalations"
+    features = spec_features(spec)
+    tmpl = _select_soul_blocks(template_path.read_text(encoding="utf-8"), features["general_qa"])
+    ace_config = ace_config or build_config(spec)
+    redirect = onboarding_redirect(ace_config)
+    feature_policy = "\n".join(
+        f"- {name}: {'enabled' if enabled else 'disabled'}"
+        for name, enabled in features.items()
+    )
+    onboarding_enabled = bool((spec.get("onboarding") or {}).get("enabled", False))
+    if features["general_qa"]:
+        restricted_behavior = (
+            "General Q&A is enabled. Follow the channel map and grounding rules below."
+        )
+    elif not onboarding_enabled:
+        # Prepared for a later activation: the redirect offers onboarding, which this
+        # profile must not start, so it has no reply to give.
+        restricted_behavior = (
+            "General Q&A is disabled. This policy overrides the channel behavior map and "
+            "every skill instruction. Only the OVERRIDE section below ranks above it. "
+            "Onboarding is not active on this profile, so no function is enabled. "
+            "Stay silent for every message: ordinary community messages, DMs, mentions, "
+            "and onboarding threads. Do not answer, classify, search campaigns, start "
+            "onboarding, or create a support escalation. A message the OVERRIDE section "
+            "covers gets its rejection. A chat message or explicit skill request cannot "
+            "enable a disabled function."
+        )
+    else:
+        restricted_behavior = (
+            "General Q&A is disabled. This policy overrides the channel behavior map and "
+            "every skill instruction. Only the OVERRIDE section below ranks above it. "
+            "For ordinary community messages: stay silent. "
+            f'For DMs, mentions, and completed onboarding threads outside an active step, '
+            f'reply exactly: "{redirect}" Do not answer, '
+            "classify, search campaigns, or create a support escalation. A message the "
+            "OVERRIDE section covers gets its rejection, not this reply. A chat message or "
+            "explicit skill request cannot enable a disabled function."
+        )
+    onboarding_policy = (
+        "onboarding.enabled is true. Handle onboarding only in its configured private thread."
+        if onboarding_enabled else
+        "onboarding.enabled is false. The profile is prepared but onboarding must not start."
+    )
     return tmpl.format(
         brand_name=d.get("brand_name", d["brand_id"]),
         voice=d["voice"],
         channel_summary=summary,
         slack_channel=slack,
+        feature_policy=feature_policy,
+        restricted_behavior=restricted_behavior,
+        onboarding_policy=onboarding_policy,
     )
 
 
@@ -220,28 +347,33 @@ def build_cronjobs(spec: dict) -> list[dict]:
     """Recurring jobs with this brand's channel targets (activated from skill blueprints)."""
     scoping = channel_scoping(spec["discord"]["channels"])
     post_target = scoping["post_targets"][0] if scoping["post_targets"] else None
-    jobs = [
-        # daily-digest posts to Slack itself (via _lib/slack_cli.py, brand-tagged) — no cron
-        # delivery target; brand profiles have no Slack gateway, only the outbound bot token.
-        {"name": "daily-digest", "schedule": "0 9 * * *", "skill": "daily-digest", "deliver": None,
-         "prompt": "Run the daily digest exactly per the daily-digest skill: ONE command "
-                   "(digest.py --post) — it posts to Slack itself. End with only [SILENT]."},
-        {"name": "nudge-inactive", "schedule": "0 10 * * *", "skill": "nudge-inactive", "deliver": None},
-        # Reply gating: zero-token pre-script; the agent runs ONLY when the script
-        # surfaces unanswered creator messages ({"wakeAgent": false} otherwise).
-        {"name": "sweep-unanswered", "schedule": "every 2m", "skill": "sweep-unanswered",
-         "script": "ace-sweep.py", "deliver": "discord",
-         "prompt": "Handle the unanswered creator messages surfaced above, following the "
-                   "sweep-unanswered skill exactly. End with only [SILENT]."},
-        # Onboarding (Vaulty replacement): zero-token pre-script handles joins/leavers/
-        # engagement/escalations itself; the agent runs ONLY for 48h nudge composition.
-        # Inert until ace.onboarding.enabled is flipped on.
+    features = spec_features(spec)
+    jobs = []
+    if features["reporting"]:
+        jobs.append(
+            {"name": "daily-digest", "schedule": "0 9 * * *", "skill": "daily-digest",
+             "deliver": None, "prompt": "Run the daily digest exactly per the daily-digest "
+             "skill: ONE command (digest.py --post) — it posts to Slack itself. End with "
+             "only [SILENT]."}
+        )
+    if features["engagement"]:
+        jobs.append({"name": "nudge-inactive", "schedule": "0 10 * * *",
+                     "skill": "nudge-inactive", "deliver": None})
+    if features["general_qa"]:
+        jobs.append(
+            {"name": "sweep-unanswered", "schedule": "every 2m", "skill": "sweep-unanswered",
+             "script": "ace-sweep.py", "deliver": "discord",
+             "prompt": "Handle the unanswered creator messages surfaced above, following the "
+                       "sweep-unanswered skill exactly. End with only [SILENT]."}
+        )
+    # The activation switch inside this script keeps a prepared profile inert.
+    jobs.append(
         {"name": "onboarding-tick", "schedule": "every 2m", "skill": "run-onboarding",
          "script": "ace-onboarding-tick.py", "deliver": "discord",
          "prompt": "Send the onboarding nudges surfaced above, following the run-onboarding "
-                   "skill (Nudge mode) exactly. End with only [SILENT]."},
-    ]
-    if post_target:
+                   "skill (Nudge mode) exactly. End with only [SILENT]."}
+    )
+    if features["announcements"] and post_target:
         # Delivers to the HOME channel on purpose. Hermes has one delivery target per job and
         # always delivers a failed run's error summary to it; while this job delivered straight
         # into #announcements, the 2026-09-21 HTTP 402 landed in front of QBounce's and Prime
@@ -256,6 +388,45 @@ def build_cronjobs(spec: dict) -> list[dict]:
                        "compose the reminder, hand it to post.py on stdin. End with only [SILENT]."}
         )
     return jobs
+
+
+# Every scheduled job Ace owns: the ones build_cronjobs generates, plus skill blueprints it
+# does not generate. A registered job missing from this set is planned as unrelated and
+# left running, so a new scheduled skill must be added here.
+ACE_CRON_JOB_NAMES = frozenset({
+    "daily-digest",
+    "nudge-inactive",
+    "sweep-unanswered",
+    "onboarding-tick",
+    "weekly-reminders",
+    "results-announcement",
+})
+
+
+def plan_cron_reconciliation(registered_jobs: list[dict], desired_jobs: list[dict]) -> dict:
+    """Plan profile-local job changes without mutating scheduler state or input data."""
+    desired_names = {job.get("name") for job in desired_jobs if job.get("name")}
+    registered_ace_names = set()
+    plan = {
+        "keep_ace_job_ids": [],
+        "pause_ace_job_ids": [],
+        "create_ace_job_names": [],
+        "preserve_unrelated_job_ids": [],
+    }
+    for job in registered_jobs:
+        name = job.get("name")
+        job_id = job.get("id")
+        if name in ACE_CRON_JOB_NAMES:
+            registered_ace_names.add(name)
+            target = "keep_ace_job_ids" if name in desired_names else "pause_ace_job_ids"
+            if job_id:
+                plan[target].append(str(job_id))
+        elif job_id:
+            plan["preserve_unrelated_job_ids"].append(str(job_id))
+    plan["create_ace_job_names"] = sorted(desired_names - registered_ace_names)
+    for key in ("keep_ace_job_ids", "pause_ace_job_ids", "preserve_unrelated_job_ids"):
+        plan[key].sort()
+    return plan
 
 
 def load_channel_directory(profile: str | Path) -> dict[str, str]:
@@ -504,7 +675,7 @@ def _apply_security_defaults(existing: dict, spec: dict, profile_dir: "Path",
         existing["timezone"] = "America/New_York"
 
 
-def merge_config(config_path: str | Path, spec: dict) -> None:
+def merge_config(config_path: str | Path, spec: dict) -> dict:
     """Merge Ace's brand config into the profile config.yaml WITHOUT clobbering Hermes' own keys
     (model, skills.external_dirs, …). Ace metadata goes under `ace:`; the answer model is set at
     Hermes' top-level `model:` only when the spec specifies one (else the brand inherits the default).
@@ -528,8 +699,19 @@ def merge_config(config_path: str | Path, spec: dict) -> None:
     prior_onboarding_channel = (prior_ace.get("onboarding") or {}).get("channel_id")
     prior_guild = str((prior_ace.get("discord") or {}).get("guild_id") or "")
     existing["ace"] = build_config(spec)
+    onboarding = existing["ace"]["onboarding"]
+    if not existing["ace"]["features"]["general_qa"]:
+        # Only a profile without general Q&A uses compiled guidance. A brand with it keeps
+        # the config it had: setup does not open its knowledge file or add this block.
+        guidance = load_onboarding_guidance(path.parent)
+        if onboarding.get("enabled"):
+            guidance = require_onboarding_guidance(guidance)
+        if guidance:
+            onboarding["guidance"] = guidance
     if prior_onboarding_channel and prior_guild == str(spec["discord"]["guild_id"]):
         existing["ace"]["onboarding"]["channel_id"] = prior_onboarding_channel
+    elif prior_onboarding_channel:
+        _drop_foreign_onboarding_gateway_references(existing, prior_onboarding_channel)
     # Resolve the provider BEFORE the model key is rewritten below — that rewrite is where
     # the routing info would otherwise disappear.
     provider_id = _provider_id(existing)
@@ -544,6 +726,44 @@ def merge_config(config_path: str | Path, spec: dict) -> None:
     _apply_security_defaults(existing, spec, path.parent, provider_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(existing, sort_keys=False), encoding="utf-8")
+    return existing["ace"]
+
+
+def _drop_foreign_onboarding_gateway_references(config: dict, channel_id: str) -> None:
+    """Remove one cloned onboarding channel from Hermes' root gateway config."""
+    discord = config.get("discord")
+    if not isinstance(discord, dict):
+        return
+
+    free_response = discord.get("free_response_channels")
+    if isinstance(free_response, str):
+        channels = [value.strip() for value in free_response.split(",") if value.strip()]
+        discord["free_response_channels"] = ",".join(
+            value for value in channels if value != str(channel_id)
+        )
+    elif isinstance(free_response, list):
+        discord["free_response_channels"] = [
+            value for value in free_response if str(value) != str(channel_id)
+        ]
+    elif free_response is not None and str(free_response) == str(channel_id):
+        discord["free_response_channels"] = ""
+
+    bindings = discord.get("channel_skill_bindings")
+    if not isinstance(bindings, list):
+        return
+    kept = []
+    for binding in bindings:
+        if not isinstance(binding, dict) or str(binding.get("id")) != str(channel_id):
+            kept.append(binding)
+            continue
+        skills = binding.get("skills")
+        if not isinstance(skills, list) or "run-onboarding" not in skills:
+            kept.append(binding)
+            continue
+        remaining = [skill for skill in skills if skill != "run-onboarding"]
+        if remaining:
+            kept.append({**binding, "skills": remaining})
+    discord["channel_skill_bindings"] = kept
 
 
 def extract_channel_directory(soul_text: str) -> str | None:
@@ -593,13 +813,15 @@ def write_profile(spec: dict, profile_dir: str | Path) -> dict:
     config_path = profile / "config.yaml"
     soul_path = profile / "SOUL.md"
     cron_path = profile / "cronjobs.yaml"
-    merge_config(config_path, spec)  # MERGE under `ace:` — preserves Hermes keys + external_dirs
+    ace_config = merge_config(
+        config_path, spec
+    )  # MERGE under `ace:`; preserves Hermes keys and external_dirs
     jobs = build_cronjobs(spec)
     # After first connect the directory exists: keep the numeric delivery targets a re-run
     # would otherwise regress to names (resolve_channels.py owns the first resolution).
     resolve_cron_deliver(jobs, load_channel_directory(profile))
     cron_path.write_text(json.dumps(jobs, indent=2), encoding="utf-8")
-    soul = render_soul(spec)
+    soul = render_soul(spec, ace_config=ace_config)
     if soul_path.exists():
         # Keep the post-connect channel directory (name → <#id> map) across re-runs:
         # it's derived from live Discord state resolve_channels.py owns, not from the spec.
@@ -649,9 +871,16 @@ def main(argv: list[str] | None = None) -> int:
 
     spec = _load_spec(args.spec)
     written = write_profile(spec, args.profile_dir)
+    features = spec_features(spec)
+    next_step = (
+        f"place knowledge.yaml in {written['data_dir']} (ACE_DATA_DIR); validate with get-knowledge"
+        if features["general_qa"] else
+        f"place knowledge.yaml in {written['data_dir']} (ACE_DATA_DIR); rerun setup to compile "
+        "and validate bounded onboarding guidance"
+    )
     print(json.dumps({
         "written": written,
-        "next": f"place knowledge.yaml in {written['data_dir']} (ACE_DATA_DIR); validate with get-knowledge",
+        "next": next_step,
     }))
     return 0
 

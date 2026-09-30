@@ -4,6 +4,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import results  # noqa: E402
 
+from _lib import brand  # noqa: E402
+
 PAYLOAD = {
     "campaign": "July GRWM Challenge",
     "winners": [
@@ -27,3 +29,11 @@ def test_render_handles_minimal_payload():
     text = results.render_payload({"name": "Mini"})
     assert "Mini" in text
     assert "participated" in text.lower()
+
+
+def test_disabled_announcements_exit_before_growi_read(monkeypatch, capsys):
+    monkeypatch.setattr(brand, "feature_enabled", lambda name, profile=None: False)
+    monkeypatch.setattr(results.growi, "fetch_results",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("Growi read")))
+    assert results.main(["--base-url", "https://example.invalid", "--project", "x"]) == 0
+    assert __import__("json").loads(capsys.readouterr().out)["disabled"] == "announcements"

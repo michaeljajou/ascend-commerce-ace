@@ -1,0 +1,80 @@
+ace:
+  brand_id: legacy-minimal
+  brand_name: legacy-minimal
+  discord:
+    guild_id: '200000000000000003'
+    channels:
+      community-chat: FULL_ACTIVE
+      announcements: POST_ONLY
+    scoping:
+      free_response:
+      - community-chat
+      ignored:
+      - announcements
+      monitor: []
+      post_targets:
+      - announcements
+    home_channel: agent-ace
+    sweep_minutes: 10
+    team_role: Ascend Team
+  classify_model: anthropic/claude-haiku-4-5
+  knowledge_file: knowledge.yaml
+  slack_channel: '#ace-escalations'
+  onboarding:
+    enabled: false
+    staff_role: Ascend Team
+    creator_roles:
+    - onboarded
+    - creator
+    nudge_hours: 48
+    escalate_days: 7
+    nudge_via: dm
+    max_retries: 3
+    archive_days: 7
+    test_mode: false
+    test_nudge_minutes: 3
+    test_escalate_minutes: 8
+    data_channel: '#ace-onboarding'
+approvals:
+  mode: smart
+  cron_mode: approve
+code_execution:
+  mode: strict
+command_allowlist:
+- python3 <REPO>/skills/*
+- python3 <REPO>/skills-admin/*
+- python3 <PROFILE>/ace/*
+- python3 <PROFILE>/skills/*
+- hermes --profile legacy-minimal
+- hermes profile legacy-minimal
+session_reset:
+  mode: idle
+  idle_minutes: 60
+platform_toolsets:
+  discord:
+  - code_execution
+  - file
+  - vision
+  cli: []
+skills:
+  creation_nudge_interval: 0
+memory:
+  nudge_interval: 0
+cron:
+  wrap_response: false
+agent:
+  max_turns: 12
+providers:
+  openrouter:
+    request_timeout_seconds: 90
+    stale_timeout_seconds: 30
+curator:
+  enabled: false
+display:
+  tool_progress: 'off'
+  interim_assistant_messages: false
+  file_mutation_verifier: false
+  turn_completion_explainer: false
+  credits_notices: false
+  memory_notifications: 'off'
+timezone: America/New_York

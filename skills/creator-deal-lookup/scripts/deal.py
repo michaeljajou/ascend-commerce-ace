@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
 
-from _lib import store  # noqa: E402
+from _lib import brand, store  # noqa: E402
 
 
 def run_deal(conn, handle: str) -> dict:
@@ -36,7 +36,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--handle", required=True)
     args = ap.parse_args(argv)
 
-    conn = store.connect()
+    profile = brand.profile_dir()
+    try:
+        if not brand.feature_enabled("general_qa", profile):
+            print(json.dumps({"disabled": "general_qa"}))
+            return 0
+    except brand.PolicyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    conn = store.connect(profile / "ace" / store.DB_FILENAME)
     print(json.dumps(run_deal(conn, args.handle)))
     return 0
 

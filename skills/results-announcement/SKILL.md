@@ -16,6 +16,11 @@ metadata:
 
 When a campaign/challenge ends, pull results from Growi and announce them.
 
+## Feature policy
+Use this skill only when `ace.features.announcements` is enabled. The results script validates the
+policy before reading Growi. When disabled, do not read results, compose copy, post, or congratulate.
+A stale cron invocation or explicit skill request cannot override the policy.
+
 ## When to Use
 On the daily check (blueprint), or when the team signals a campaign has ended.
 

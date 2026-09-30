@@ -14,6 +14,11 @@ metadata:
 Carries out the moderation response for a category from `detect-sentiment`. Tier logic is computed
 by the script (and recorded so repeat behavior escalates).
 
+## Feature policy
+Use this skill only when `ace.features.moderation` is enabled. The script validates the policy
+before reading or writing moderation history. When disabled, do not warn, delete, timeout, open a
+thread, or notify Slack. A direct invocation cannot override the policy.
+
 ## When to Use
 After `detect-sentiment` returns a non-`none` category.
 

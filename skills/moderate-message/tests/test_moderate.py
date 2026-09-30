@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import moderate  # noqa: E402
 
-from _lib import store  # noqa: E402
+from _lib import brand, store  # noqa: E402
 
 
 @pytest.fixture
@@ -40,3 +40,11 @@ def test_scam_is_immediately_final(conn):
 def test_event_is_recorded(conn):
     moderate.run_moderate(conn, "@ava", "off_topic", "community-chat", now=1000)
     assert store.recent_moderation_count(conn, "@ava", since_ts=0.0) == 1
+
+
+def test_disabled_moderation_exits_before_opening_the_store(monkeypatch, capsys):
+    monkeypatch.setattr(brand, "feature_enabled", lambda name, profile=None: False)
+    monkeypatch.setattr(store, "connect",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("store write")))
+    assert moderate.main(["--handle", "@ava", "--category", "scam"]) == 0
+    assert __import__("json").loads(capsys.readouterr().out)["disabled"] == "moderation"

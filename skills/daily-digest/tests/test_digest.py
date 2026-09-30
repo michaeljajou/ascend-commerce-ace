@@ -7,7 +7,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import digest  # noqa: E402
 
-from _lib import store  # noqa: E402
+from _lib import brand, store  # noqa: E402
 from _lib.models import ANSWERED, ESCALATED, Creator, Deal  # noqa: E402
 
 NOW = 1_700_000_000.0
@@ -82,3 +82,11 @@ def test_post_flag_sends_only_the_rendered_text(tmp_path, monkeypatch, capsys):
     assert digest.main(["--post"]) == 0
     assert sent["text"].startswith("[Pilot] *Ace daily digest*")   # brand tag + human text
     assert "{" not in sent["text"]                                 # no JSON anywhere
+
+
+def test_disabled_reporting_exits_before_opening_the_store(monkeypatch, capsys):
+    monkeypatch.setattr(brand, "feature_enabled", lambda name, profile=None: False)
+    monkeypatch.setattr(store, "connect",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("store read")))
+    assert digest.main(["--post"]) == 0
+    assert __import__("json").loads(capsys.readouterr().out)["disabled"] == "reporting"

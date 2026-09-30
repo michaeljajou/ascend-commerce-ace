@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -28,3 +29,22 @@ def test_found_deal_returns_terms(conn):
 def test_missing_deal_is_never_fabricate_signal(conn):
     out = deal.run_deal(conn, "@nobody")
     assert out == {"found": False, "handle": "@nobody"}
+
+
+def test_disabled_general_qa_refuses_before_opening_store(tmp_path, monkeypatch, capsys):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    (ace_dir / "brand.json").write_text(
+        json.dumps({"features": {"general_qa": False}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(store, "connect",
+                        lambda *_args: (_ for _ in ()).throw(AssertionError("store read")))
+    monkeypatch.setenv("ACE_DATA_DIR", str(ace_dir))
+
+    assert deal.main(["--handle", "@ava"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"disabled": "general_qa"}
+
+
+def test_cli_rejects_a_cross_profile_policy_override(tmp_path):
+    with pytest.raises(SystemExit):
+        deal.main(["--profile-dir", str(tmp_path), "--handle", "@ava"])

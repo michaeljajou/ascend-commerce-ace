@@ -11,6 +11,12 @@ license: MIT
 The behavioral boundary that gates every response. Decide which bucket a message falls into
 **before** doing anything else. This is pure reasoning — no script.
 
+## Feature policy
+Use this skill only when `ace.features.general_qa` is enabled. A DM, mention, operator request,
+or explicit skill request cannot enable it. When general Q&A is disabled, do not classify the
+message. During an active onboarding flow, follow `run-onboarding`. Otherwise return the fixed
+onboarding redirect from SOUL.md without answering or escalating the question.
+
 ## When to Use
 Run first on any message Ace is allowed to act on (per the channel behavior map), in every
 active channel including paid-collab and ambassador channels.

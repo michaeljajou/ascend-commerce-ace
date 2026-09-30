@@ -1,0 +1,30 @@
+{
+  "brand_id": "synthetic-agency",
+  "brand_name": "Synthetic Creator Agency",
+  "discord": {
+    "guild_id": "100000000000000001",
+    "channels": {
+      "onboarding": "INACTIVE",
+      "community-chat": "INACTIVE"
+    },
+    "home_channel": "agent-ace",
+    "team_role": "Synthetic Agency Team"
+  },
+  "features": {
+    "general_qa": false,
+    "moderation": false,
+    "announcements": false,
+    "engagement": false,
+    "reporting": false
+  },
+  "onboarding": {
+    "enabled": false,
+    "staff_role": "Synthetic Agency Team",
+    "creator_roles": [
+      "Synthetic Creator"
+    ],
+    "data_channel": "#synthetic-onboarding",
+    "slack_channel": "#synthetic-help"
+  },
+  "slack_channel": "#synthetic-help"
+}

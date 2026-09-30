@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # → skills
 
-from _lib import store  # noqa: E402
+from _lib import brand, store  # noqa: E402
 
 HOUR = 3600.0
 
@@ -94,13 +94,21 @@ def main(argv: list[str] | None = None) -> int:
                          "raw JSON can never end up in Slack")
     args = ap.parse_args(argv)
 
+    try:
+        if not brand.feature_enabled("reporting"):
+            print(json.dumps({"disabled": "reporting"}))
+            return 0
+    except brand.PolicyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
     conn = store.connect()
     d = build_digest(conn, hours=args.hours, deadline_days=args.deadline_days)
     text = render_digest(d)
     if args.post:
         from _lib import slack_cli
 
-        return slack_cli.main(["post", "--text", text])
+        return slack_cli.main(["post", "--purpose", "reporting", "--text", text])
     print(json.dumps({"digest": d, "text": text}))
     return 0
 

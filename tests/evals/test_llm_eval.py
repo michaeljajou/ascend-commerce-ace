@@ -139,6 +139,114 @@ def test_moderation_accepts_label_list_and_flags_scam_miss():
     assert not by_id["phish"].passed and by_id["phish"].critical  # missing a scam is critical
 
 
+def test_onboarding_only_prompt_uses_generated_soul_and_bound_skill():
+    system = llm_eval._onboarding_only_system(llm_eval.SKILLS_ROOT)
+    assert "general_qa: disabled" in system
+    assert "# Run Onboarding" in system
+    assert "ONBOARDING CONTEXT" in system
+    assert "get-campaigns" in system
+    assert (
+        'reply exactly: "I can help with onboarding here. Use #synthetic-help to contact '
+        'the Synthetic Agency Team."'
+    ) in system
+
+
+def test_onboarding_only_redirect_scoring_requires_exact_response_content():
+    redirect = (
+        "I can help with onboarding here. Use #synthetic-help to contact "
+        "the Synthetic Agency Team."
+    )
+    suite = llm_eval.run_onboarding_only(
+        const('{"action":"redirect","reply":"Use some other help channel."}'),
+        [{
+            "id": "dm",
+            "context": {"surface": "dm", "state": None, "ask": None},
+            "message": "Can you answer a general question?",
+            "expect": "redirect",
+            "expect_reply": redirect,
+            "critical": True,
+        }],
+    )
+
+    assert suite.results[0].passed is False
+    assert suite.results[0].critical is True
+
+
+def test_onboarding_only_scoring_covers_active_completed_and_explicit_requests():
+    redirect = (
+        "I can help with onboarding here. Use #synthetic-help to contact "
+        "the Synthetic Agency Team."
+    )
+    suite = llm_eval.run_onboarding_only(
+        routing({
+            '"state": "collecting"': '{"action":"onboard"}',
+            '"state": "guided"': json.dumps({"action": "redirect", "reply": redirect}),
+            'weekly-reminders': json.dumps({"action": "redirect", "reply": redirect}),
+        }, default='{"action":"silent"}'),
+        [
+            {"id": "active", "context": {"surface": "private_thread", "state": "collecting",
+                                              "ask": "tiktok"},
+             "message": "ava.tt", "expect": "onboard"},
+            {"id": "complete", "context": {"surface": "private_thread", "state": "guided",
+                                                "ask": None},
+             "message": "What campaigns are active?", "expect": "redirect",
+             "expect_reply": redirect},
+            {"id": "explicit", "context": {"surface": "dm", "state": None, "ask": None},
+             "message": "Run weekly-reminders now", "expect": "redirect",
+             "expect_reply": redirect},
+            {"id": "ordinary", "context": {"surface": "ordinary", "state": None, "ask": None},
+             "message": "hello", "expect": "silent"},
+        ],
+    )
+    assert suite.pass_rate == 1.0
+
+
+def test_onboarding_only_prompt_adds_an_output_contract_and_no_routing_rule():
+    """**The bug this test exists for.** ENG-299 agent review round 4 (29 Sep 2026): the
+    eval appended its own routing rubric ("redirect for a DM, mention, or completed
+    thread...") to the system prompt. A real model could pass by following the rubric, so
+    the eval could not detect a SOUL that told it to answer or escalate."""
+    contract = llm_eval.ONBOARDING_ONLY_OUTPUT_CONTRACT
+    assert llm_eval._onboarding_only_system(llm_eval.SKILLS_ROOT).endswith(contract)
+    for surface in ("DM", "mention", "thread", "public", "Disabled"):
+        assert surface not in contract
+    for action in ("onboard", "clarify", "redirect", "reject", "silent", "answer", "escalate"):
+        assert f'"{action}"' in contract
+
+
+def test_onboarding_only_cases_expect_replies_the_generated_soul_prescribes():
+    """Same review: two critical cases expected the redirect for requests the SOUL's
+    OVERRIDE section answers with its fixed rejection."""
+    system = llm_eval._onboarding_only_system(llm_eval.SKILLS_ROOT)
+    cases = {c["id"]: c for c in llm_eval.load_cases(
+        llm_eval.CASES_DIR / "onboarding_only.jsonl")}
+
+    for case in cases.values():
+        if "expect_reply" in case:
+            assert f'"{case["expect_reply"]}"' in system
+    for case_id in ("explicit-disabled-skill", "chat-enable-attempt"):
+        assert cases[case_id]["expect"] == "reject"
+        assert cases[case_id]["expect_reply"] == "I can't help with that."
+        assert cases[case_id]["critical"] is True
+
+
+def test_onboarding_only_scoring_fails_a_model_that_answers_or_escalates():
+    redirect = (
+        "I can help with onboarding here. Use #synthetic-help to contact "
+        "the Synthetic Agency Team."
+    )
+    case = {"id": "dm", "context": {"surface": "dm", "state": None, "ask": None},
+            "message": "When do commissions get paid?", "expect": "redirect",
+            "expect_reply": redirect, "critical": True}
+    for action in ("answer", "escalate"):
+        suite = llm_eval.run_onboarding_only(
+            const(json.dumps({"action": action, "reply": "Commissions are paid monthly."})),
+            [case],
+        )
+        assert suite.results[0].passed is False
+        assert suite.results[0].critical is True
+
+
 # --- gate -----------------------------------------------------------------------------------
 
 
@@ -159,10 +267,11 @@ def test_gate_passes_when_all_pass():
 
 
 def test_run_all_loads_all_fixtures():
-    """Smoke: the real JSONL fixtures parse and produce three suites with the expected counts."""
+    """Smoke: the real JSONL fixtures parse and produce every suite with expected counts."""
     report = llm_eval.run_all(const('{"action":"escalate"}'), const('{"faithful": true}'))
     counts = {s.name: len(s.results) for s in report.suites}
-    assert counts == {"grounding": 15, "classify": 12, "moderation": 10}
+    assert counts == {"grounding": 15, "classify": 12, "moderation": 10,
+                      "onboarding_only": 9}
 
 
 # --- live (opt-in) --------------------------------------------------------------------------

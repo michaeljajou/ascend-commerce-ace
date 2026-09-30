@@ -1,0 +1,96 @@
+ace:
+  brand_id: legacy-brand
+  brand_name: Legacy Brand
+  discord:
+    guild_id: '200000000000000002'
+    channels:
+      announcements: POST_ONLY
+      campaigns: POST_ANSWER
+      community-chat: FULL_ACTIVE
+      our-products: ANSWER
+      success-stories: MONITOR_ONLY
+      paid-collabs: PAID_COLLAB
+      ambassadors: AMBASSADOR
+      content-inspo: INACTIVE
+    scoping:
+      free_response:
+      - ambassadors
+      - campaigns
+      - community-chat
+      - our-products
+      - paid-collabs
+      ignored:
+      - announcements
+      - content-inspo
+      monitor:
+      - success-stories
+      post_targets:
+      - announcements
+      - campaigns
+    home_channel: agent-ace
+    sweep_minutes: 15
+    team_role: Legacy Team
+  classify_model: anthropic/claude-haiku-4-5
+  knowledge_file: knowledge.yaml
+  slack_channel: '#legacy-ops'
+  onboarding:
+    enabled: true
+    staff_role: Legacy Team
+    creator_roles:
+    - onboarded
+    - creator
+    nudge_hours: 48
+    escalate_days: 7
+    nudge_via: dm
+    max_retries: 3
+    archive_days: 7
+    test_mode: false
+    test_nudge_minutes: 3
+    test_escalate_minutes: 8
+    data_channel: '#legacy-onboarding'
+    welcome_message: Welcome to Legacy Brand!
+  growi_project: legacy-project
+model: anthropic/claude-sonnet-4-6
+approvals:
+  mode: smart
+  cron_mode: approve
+code_execution:
+  mode: strict
+command_allowlist:
+- python3 <REPO>/skills/*
+- python3 <REPO>/skills-admin/*
+- python3 <PROFILE>/ace/*
+- python3 <PROFILE>/skills/*
+- hermes --profile legacy-brand
+- hermes profile legacy-brand
+session_reset:
+  mode: idle
+  idle_minutes: 60
+platform_toolsets:
+  discord:
+  - code_execution
+  - file
+  - vision
+  cli: []
+skills:
+  creation_nudge_interval: 0
+memory:
+  nudge_interval: 0
+cron:
+  wrap_response: false
+agent:
+  max_turns: 12
+providers:
+  openrouter:
+    request_timeout_seconds: 90
+    stale_timeout_seconds: 30
+curator:
+  enabled: false
+display:
+  tool_progress: 'off'
+  interim_assistant_messages: false
+  file_mutation_verifier: false
+  turn_completion_explainer: false
+  credits_notices: false
+  memory_notifications: 'off'
+timezone: America/New_York

@@ -101,14 +101,17 @@ def test_escalation_text_has_all_required_fields():
 
 # ── main(): integration with mocked REST ───────────────────────────────────────
 
-def make_profile(tmp_path, *, enabled=True, test_mode=True, channel_id="900"):
+def make_profile(tmp_path, *, enabled=True, test_mode=True, channel_id="900", features=None):
     ob = {"enabled": enabled, "test_mode": test_mode, "channel_id": channel_id,
           "creator_roles": ["Creator"], "slack_channel": "#ace-escalations"}
-    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"ace": {
+    ace = {
         "brand_id": "pilot", "brand_name": "Pilot",
         "discord": {"guild_id": "g1", "team_role": "Ascend Team"},
         "onboarding": ob,
-    }}), encoding="utf-8")
+    }
+    if features is not None:
+        ace["features"] = features
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"ace": ace}), encoding="utf-8")
     (tmp_path / "channel_directory.json").write_text(json.dumps({"platforms": {"discord": [
         {"id": "555", "name": "community-chat", "type": "channel"},
         {"id": "900", "name": "onboarding", "type": "channel"},
@@ -262,6 +265,170 @@ def test_engagement_stops_the_clock(tmp_path, monkeypatch):
     out = run_tick(tmp_path, monkeypatch, fakes)
     assert db_row(tmp_path, "@chatty")["onboarding_state"] == "active"
     assert json.loads(out) == {"wakeAgent": False}                       # no nudge for active creators
+
+
+def test_engagement_disabled_skips_completed_creator_scans_and_nudges(tmp_path, monkeypatch):
+    make_profile(tmp_path, features={"engagement": False})
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, guided_at, joined_at)"
+                 " VALUES ('@done','guided','77','7001',?,?)", (ts_ago(minutes=30), ts_ago(minutes=40)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "done"}, "roles": []}])
+    real_discord = fakes.discord
+
+    def no_community_scan(token, path, payload=None, method=None):
+        if "/channels/555/messages" in path:
+            raise AssertionError("community messages read while engagement is disabled")
+        return real_discord(token, path, payload, method)
+
+    monkeypatch.setattr(tick, "discord", no_community_scan)
+    monkeypatch.setattr(tick, "slack", fakes.slack)
+    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+    assert tick.main(["--profile-dir", str(tmp_path)]) == 0
+    assert db_row(tmp_path, "@done")["onboarding_state"] == "guided"
+
+
+def test_engagement_disabled_keeps_unfinished_onboarding_reminders(tmp_path, monkeypatch):
+    make_profile(tmp_path, features={"engagement": False})
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at)"
+                 " VALUES ('@unfinished','collecting','77','7001',?)", (ts_ago(minutes=5),))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "unfinished"}, "roles": []}])
+    out = run_tick(tmp_path, monkeypatch, fakes)
+    assert json.loads(out) == {"wakeAgent": False}
+    assert db_row(tmp_path, "@unfinished")["onboarding_state"] == "nudged"
+
+
+def test_engagement_disabled_still_archives_completed_threads(tmp_path, monkeypatch):
+    make_profile(tmp_path, features={"engagement": False})
+    cfg_path = tmp_path / "config.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["ace"]["onboarding"]["archive_days"] = 0
+    cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, guided_at, joined_at)"
+                 " VALUES ('@done','guided','77','7001',?,?)", (ts_ago(minutes=1), ts_ago(minutes=5)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "done"}, "roles": []}])
+    run_tick(tmp_path, monkeypatch, fakes)
+    assert db_row(tmp_path, "@done")["thread_id"] is None
+    assert ("/channels/7001", {"archived": True, "locked": False}, "PATCH") in fakes.writes
+
+
+ARCHIVE_7001 = ("/channels/7001", {"archived": True, "locked": False}, "PATCH")
+
+
+def set_onboarding_config(tmp_path, **values):
+    cfg_path = tmp_path / "config.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["ace"]["onboarding"].update(values)
+    cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+
+def test_engagement_enabled_keeps_a_guided_thread_when_escalation_cannot_post(
+        tmp_path, monkeypatch):
+    """**The bug this test exists for.** ENG-299 agent review round 6 (29 Sep 2026): thread
+    cleanup was widened to the guided state for every profile, to close threads where
+    engagement is disabled. On `main` only active and resolved threads are archived. A
+    brand with engagement enabled lost the thread of a creator whose nudge was already
+    spent and whose escalation could not post, and with it the thread fallback for a
+    later nudge."""
+    make_profile(tmp_path, test_mode=False)                  # real 48h / 7d / 7d windows
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    # A creator who went quiet, was escalated and resolved, then finished: guided() clears
+    # last_active_at, so resolved_at is the only date cleanup could use. Without a date
+    # cleanup skips the row whatever states it selects, and the state filter goes untested.
+    conn.execute(
+        "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
+        " nudged_at, resolved_at, guided_at)"
+        " VALUES ('@quiet','guided','77','7001',?,?,?,?)",
+        (ts_ago(days=20), ts_ago(days=18), ts_ago(days=8), ts_ago(days=1)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "quiet"}, "roles": []}])
+    escalations = []
+    fakes.slack = lambda token, method, payload: (
+        escalations.append(method) or {"ok": False, "error": "channel_not_found"})
+
+    run_tick(tmp_path, monkeypatch, fakes)
+
+    row = db_row(tmp_path, "@quiet")
+    assert escalations == ["chat.postMessage"]               # it was due, and could not post
+    assert row["onboarding_state"] == "guided" and row["thread_id"] == "7001"
+    assert ARCHIVE_7001 not in fakes.writes
+
+
+def test_engagement_enabled_keeps_a_guided_thread_shorter_archive_window(
+        tmp_path, monkeypatch):
+    """The row guided() leaves: no last_active_at. `main` keeps its thread because cleanup
+    neither selects a guided row nor dates one from guided_at. This test fails only when
+    both change at once (the `73e17a2` tick);
+    `test_engagement_enabled_keeps_a_guided_thread_when_escalation_cannot_post` pins the
+    state filter alone and `test_engagement_enabled_does_not_date_an_active_thread_from_guidance`
+    pins the cleanup date alone."""
+    make_profile(tmp_path, test_mode=False)
+    set_onboarding_config(tmp_path, archive_days=1)
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute(
+        "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
+        " guided_at) VALUES ('@recent','guided','77','7001',?,?)",
+        (ts_ago(hours=31), ts_ago(hours=30)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "recent"}, "roles": []}])
+
+    run_tick(tmp_path, monkeypatch, fakes)
+
+    row = db_row(tmp_path, "@recent")
+    assert row["onboarding_state"] == "guided" and row["thread_id"] == "7001"
+    assert ARCHIVE_7001 not in fakes.writes
+
+
+def test_engagement_enabled_does_not_date_an_active_thread_from_guidance(
+        tmp_path, monkeypatch):
+    """`main` dates cleanup from resolved_at or last_active_at only."""
+    make_profile(tmp_path, test_mode=False)
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute(
+        "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
+        " guided_at) VALUES ('@legacy','active','77','7001',?,?)",
+        (ts_ago(days=30), ts_ago(days=29)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "legacy"}, "roles": []}])
+
+    run_tick(tmp_path, monkeypatch, fakes)
+
+    assert db_row(tmp_path, "@legacy")["thread_id"] == "7001"
+    assert ARCHIVE_7001 not in fakes.writes
+
+
+def test_engagement_enabled_still_archives_active_and_resolved_threads(tmp_path, monkeypatch):
+    make_profile(tmp_path, test_mode=False)
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute(
+        "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
+        " guided_at, last_active_at) VALUES ('@active','active','77','7001',?,?,?)",
+        (ts_ago(days=30), ts_ago(days=29), ts_ago(days=8)))
+    conn.execute(
+        "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
+        " resolved_at) VALUES ('@resolved','resolved','78','7002',?,?)",
+        (ts_ago(days=30), ts_ago(days=8)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "active"}, "roles": []},
+                              {"user": {"id": "78", "username": "resolved"}, "roles": []}])
+
+    run_tick(tmp_path, monkeypatch, fakes)
+
+    assert db_row(tmp_path, "@active")["thread_id"] is None
+    assert db_row(tmp_path, "@resolved")["thread_id"] is None
+    assert ARCHIVE_7001 in fakes.writes
+    assert ("/channels/7002", {"archived": True, "locked": False}, "PATCH") in fakes.writes
 
 
 def test_quiet_creator_gets_nudge_wake_once(tmp_path, monkeypatch):
@@ -487,6 +654,97 @@ def test_rejoin_after_leaving_restarts_automatically(tmp_path, monkeypatch):
     welcome = next(pl for p, pl, _ in fakes.writes if p == "/channels/7001/messages")
     assert "welcome back" in welcome["content"].lower()                # returning variant
     assert ("/channels/7000", {"archived": True, "locked": False}, "PATCH") in fakes.writes
+
+
+def test_completed_creator_who_leaves_and_rejoins_gets_roles_again(tmp_path, monkeypatch):
+    """**The bug this test exists for.** ENG-299 agent review round 3 (28 Sep 2026): a
+    creator who finished onboarding, left, and rejoined was answered with the
+    already-complete redirect on their first message back. The rejoin keeps their tiktok,
+    email and role on purpose and restarts the row at collecting, but the idempotence
+    check read the remembered tiktok and role as completion. Discord had stripped their
+    roles when they left, so with the access gate on they stayed locked out.
+
+    Runs the real tick, onboarding flow and role assignment against one profile DB; only
+    the Discord and Slack transports are faked."""
+    import assign_role
+    import onboarding
+    from _lib import sheet, store
+
+    make_profile(tmp_path, features={name: False for name in tick.FEATURE_NAMES})
+    cfg_path = tmp_path / "config.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["ace"]["onboarding"]["guidance"] = {
+        "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
+        "getting_started": ["Introduce yourself."],
+        "how_to_reach_team": "Use #help-desk to contact the Agency Team.",
+    }
+    cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    seed_state(tmp_path)
+    monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "ace"))
+
+    role_grants, signups = [], []
+
+    def discord_roles_api(token, path, method="GET"):
+        if path == "/guilds/g1/roles":
+            return [{"id": "r1", "name": "Ascend Team"}, {"id": "r2", "name": "Creator"}]
+        role_grants.append((method, path))
+        return {}
+
+    monkeypatch.setattr(assign_role, "request", discord_roles_api)
+    monkeypatch.setattr(onboarding, "_post",
+                        lambda text, key, default=None: signups.append(key) or True)
+    monkeypatch.setattr(sheet, "sync_creator", lambda row, **kw: False)
+    grant = ("PUT", "/guilds/g1/members/77/roles/r2")
+    member = {"user": {"id": "77", "username": "boomerang"}, "roles": []}
+    fakes = FakeAPIs(members=[member])
+
+    # First lifecycle: joins, answers every question, is guided.
+    run_tick(tmp_path, monkeypatch, fakes)
+    conn = store.connect()
+    assert onboarding.answer(conn, "@boomerang", "boom.tt")["ask"] == "email"
+    assert onboarding.answer(conn, "@boomerang", "b@x.com")["ask"] == "phone"
+    first = onboarding.answer(conn, "@boomerang", "skip")
+    assert first["state"] == "complete" and first["assigned"] == ["Creator"]
+    onboarding.guided(conn, "@boomerang")
+    assert role_grants == [grant] and signups == ["data_channel"]
+
+    # Leaves: Discord drops their roles; the tick stops the clock.
+    fakes.members = []
+    run_tick(tmp_path, monkeypatch, fakes)
+    assert db_row(tmp_path, "@boomerang")["onboarding_state"] == "left"
+
+    # Rejoins: fresh lifecycle, remembered identity.
+    fakes.members = [member]
+    run_tick(tmp_path, monkeypatch, fakes)
+    remembered = {"tiktok": "boom.tt", "email": "b@x.com", "skipped_fields": "phone",
+                  "role": "Creator", "discord_id": "77"}
+    row = db_row(tmp_path, "@boomerang")
+    assert row["onboarding_state"] == "collecting" and row["thread_id"] == "7002"
+    assert row["guided_at"] is None
+    assert {key: row[key] for key in remembered} == remembered
+
+    context = onboarding.conversation_context(conn, "@boomerang")
+    assert context["state"] == "collecting" and "guidance" not in context
+
+    back = onboarding.answer(conn, "@boomerang", "hey, I'm back")
+    assert "already_complete" not in back
+    assert back["ok"] is True and back["state"] == "complete"
+    assert back["next_step"] == "guidance" and back["guidance_mode"] == "compiled"
+    assert back["assigned"] == ["Creator"]
+    assert role_grants == [grant, grant]                                # roles assigned again
+    row = db_row(tmp_path, "@boomerang")
+    assert {key: row[key] for key in remembered} == remembered         # nothing re-collected
+    assert row["retries"] == 0 and row["onboarding_state"] == "complete"
+    onboarding.guided(conn, "@boomerang")
+
+    # An ordinary message after the second completion changes nothing.
+    later = onboarding.answer(conn, "@boomerang", "what campaigns are live?")
+    assert later["already_complete"] is True and later["next_step"] == "redirect"
+    assert later["redirect"] == (
+        "I can help with onboarding here. Use #help-desk to contact the Agency Team.")
+    assert role_grants == [grant, grant]
+    assert signups == ["data_channel", "data_channel"]                  # one per lifecycle
+    assert db_row(tmp_path, "@boomerang")["onboarding_state"] == "guided"
 
 
 def test_escalated_member_still_present_is_not_reonboarded(tmp_path, monkeypatch):

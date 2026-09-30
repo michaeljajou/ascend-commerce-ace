@@ -16,6 +16,12 @@ metadata:
 
 Keeps newly onboarded creators engaged. Daily cron.
 
+## Feature policy
+Use this skill only when `ace.features.engagement` is enabled. The script validates the policy
+before reading creator activity. When disabled, do not scan activity, send post-completion nudges,
+or flag inactive completed creators. Incomplete onboarding reminders remain part of
+`run-onboarding`, not this skill.
+
 ## When to Use
 Daily (blueprint). Acts only on creators who completed onboarding.
 
@@ -30,7 +36,8 @@ Daily (blueprint). Acts only on creators who completed onboarding.
 3. For each `flag` handle → post a brief note to the team Slack channel so the team can reach
    out (the script brand-tags it automatically):
    ```
-   python ${HERMES_SKILL_DIR}/../_lib/slack_cli.py post --text "<who's inactive and since when>"
+   python ${HERMES_SKILL_DIR}/../_lib/slack_cli.py post --purpose engagement \
+     --text "<who's inactive and since when>"
    ```
 
 ## Pitfalls

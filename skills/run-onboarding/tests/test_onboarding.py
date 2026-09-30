@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import assign_role  # noqa: E402
 import onboarding  # noqa: E402
 
-from _lib import sheet, store  # noqa: E402
+from _lib import brand, sheet, store  # noqa: E402
 
 
 @pytest.fixture
@@ -114,6 +114,61 @@ def test_resolve_and_flag(conn):
 
 def test_status_unknown_creator(conn):
     assert onboarding.status(conn, "@ghost")["error"] == "not found"
+
+
+@pytest.mark.parametrize("argv", [
+    ["start", "--handle", "@blocked"],
+    ["context", "--handle", "@blocked"],
+])
+def test_disabled_onboarding_cli_refuses_before_opening_store(
+        argv, tmp_path, monkeypatch, capsys):
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    brand.write_sidecar(tmp_path, {
+        "features": {"general_qa": False},
+        "onboarding": {"enabled": False},
+    })
+    monkeypatch.setenv("ACE_DATA_DIR", str(ace_dir))
+    monkeypatch.setattr(store, "connect",
+                        lambda *_args: (_ for _ in ()).throw(AssertionError("store opened")))
+
+    assert onboarding.main(argv) == 0
+    assert __import__("json").loads(capsys.readouterr().out) == {"disabled": "onboarding"}
+
+
+@pytest.mark.parametrize("argv", [
+    ["start", "--handle", "@flipper"],
+    ["answer", "--handle", "@flipper", "--text", "@flip_tt"],
+    ["set", "--handle", "@flipper", "--tiktok", "@flip_tt"],
+    ["retry", "--handle", "@flipper"],
+    ["complete", "--handle", "@flipper"],
+    ["guided", "--handle", "@flipper"],
+    ["flag", "--handle", "@flipper"],
+    ["context", "--handle", "@flipper"],
+], ids=lambda argv: argv[0])
+def test_a_general_qa_brand_runs_the_creator_flow_whatever_the_sidecar_switch_says(
+        argv, tmp_path, monkeypatch, capsys):
+    """**The bug this test exists for.** ENG-299 regression review (30 Sep 2026): the
+    creator-flow commands refused whenever the sidecar's `onboarding.enabled` was false.
+    Only setup rewrites the sidecar, while the tick reads `config.yaml`, so a brand whose
+    switch was flipped by editing `config.yaml` (the `admin-commands` path) opened
+    onboarding threads and then answered every creator with `{"disabled": "onboarding"}`.
+    `main` had no script-level switch for such a brand: its skill text decides."""
+    ace_dir = tmp_path / "ace"
+    ace_dir.mkdir()
+    brand.write_sidecar(tmp_path, {"onboarding": {"enabled": False}})     # no `features`
+    (tmp_path / "config.yaml").write_text(
+        "ace:\n  onboarding:\n    enabled: true\n", encoding="utf-8")
+    monkeypatch.setenv("ACE_DATA_DIR", str(ace_dir))
+    onboarding.main(["start", "--handle", "@flipper"])  # the row the tick creates
+    onboarding.main(["set", "--handle", "@flipper", "--tiktok", "@flip_tt"])
+    capsys.readouterr()
+
+    assert onboarding.main(argv) == 0
+
+    out = __import__("json").loads(capsys.readouterr().out)
+    assert "disabled" not in out
+    assert store.get_creator(store.connect(), "@flipper") is not None   # the store was used
 
 
 def test_stats_shape(conn):
@@ -514,6 +569,235 @@ def test_answer_on_an_already_finished_creator_does_not_redo_collection(conn, of
     onboarding.set_fields(conn, "@ava", tiktok="ava.tt", email="a@x.com", phone="+1 555 010 0100")
     out = onboarding.answer(conn, "@ava", "thanks!")
     assert out["ask"] is None and out["state"] == onboarding.COMPLETE
+
+
+def test_post_completion_message_never_repeats_completion_side_effects(conn, monkeypatch):
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.set_fields(conn, "@ava", tiktok="ava.tt")
+    onboarding.complete(conn, "@ava", now=200.0)
+    monkeypatch.setattr(onboarding, "complete",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("completed twice")))
+
+    out = onboarding.answer(conn, "@ava", "Can you answer a general question?", now=300.0)
+
+    assert out["already_complete"] is True
+    assert out["ask"] is None
+
+
+def restrict_to_onboarding(monkeypatch):
+    """The onboarding-only policy, with the guidance setup compiles for it."""
+    monkeypatch.setattr(brand, "load_policy",
+                        lambda profile=None: {name: False for name in brand.FEATURE_NAMES})
+    monkeypatch.setattr(brand, "config", lambda profile=None: {
+        "onboarding": {"guidance": {
+            "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
+            "getting_started": ["Introduce yourself."],
+            "how_to_reach_team": "Use #help-desk to contact the Agency Team.",
+        }}
+    })
+
+
+def test_a_general_qa_brand_is_told_to_answer_a_finished_creator(conn):
+    """**The bug this test exists for.** ENG-299 (29 Sep 2026): a creator who had finished
+    onboarding asked a question in their thread. On `main` the skill told every brand to
+    answer it. The onboarding-only work made the script return next_step "redirect" with
+    the onboarding-only reply for every profile, so a brand with general Q&A enabled
+    stopped answering creators it had already onboarded."""
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.set_fields(conn, "@ava", tiktok="ava.tt")
+    onboarding.complete(conn, "@ava", now=200.0)
+
+    out = onboarding.answer(conn, "@ava", "What campaigns are active?", now=300.0)
+
+    assert out["already_complete"] is True
+    assert out["guidance_mode"] == "legacy_full_feature"
+    assert out["next_step"] == "answer"
+    assert "redirect" not in out
+
+
+def test_an_onboarding_only_profile_is_told_to_redirect_a_finished_creator(conn, monkeypatch):
+    restrict_to_onboarding(monkeypatch)
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.set_fields(conn, "@ava", tiktok="ava.tt")
+    onboarding.complete(conn, "@ava", now=200.0)
+
+    out = onboarding.answer(conn, "@ava", "What campaigns are active?", now=300.0)
+
+    assert out["already_complete"] is True
+    assert out["next_step"] == "redirect"
+    assert out["redirect"] == (
+        "I can help with onboarding here. Use #help-desk to contact the Agency Team."
+    )
+
+
+def seed_remembered_creator(conn, state, guided_at=None):
+    """A creator Ace already knows: fields and role stored, lifecycle set by the caller."""
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.set_fields(conn, "@ava", tiktok="ava.tt", email="a@x.com")
+    store.update_onboarding(conn, "@ava", role="Creator", discord_id="77",
+                            skipped_fields="phone", retries=0,
+                            onboarding_state=state, guided_at=guided_at)
+
+
+def record_role_assignments(monkeypatch):
+    granted: list[str] = []
+    monkeypatch.setattr(assign_role, "assign",
+                        lambda user_id, roles=None, profile=None: granted.append(user_id) or {
+                            "ok": True, "assigned": ["onboarded", "creator"]})
+    return granted
+
+
+@pytest.mark.parametrize("state", [
+    "new", "collecting", "nudged", "escalated", "resolved", "active", "flagged",
+])
+def test_remembered_fields_in_a_restarted_lifecycle_are_not_completion(
+        conn, offline, monkeypatch, state):
+    """**The bug this test exists for.** ENG-299 agent review round 3 (28 Sep 2026): the
+    idempotence check read any row with a stored tiktok and role as already complete.
+    onboarding_tick keeps both when a creator rejoins and restarts the row at collecting,
+    because Discord stripped their roles when they left. answer() returned
+    already_complete with the redirect, so the returning creator never got their roles
+    back. The states after collecting are here because a restarted creator who goes quiet
+    or gets stuck reaches them without finishing: they carry no guided_at."""
+    seed_remembered_creator(conn, state)
+    granted = record_role_assignments(monkeypatch)
+
+    context = onboarding.conversation_context(conn, "@ava")
+    out = onboarding.answer(conn, "@ava", "hey, I'm back", now=300.0)
+
+    assert "guidance" not in context                     # not presented as finished
+    assert "already_complete" not in out
+    assert out["ok"] is True and out["state"] == onboarding.COMPLETE
+    assert out["next_step"] == "guidance"
+    assert granted == ["77"]                              # roles restored
+    assert [key for key, _ in offline] == ["data_channel"]
+    row = onboarding.status(conn, "@ava")
+    assert (row["tiktok"], row["email"], row["declined"]) == ("ava.tt", "a@x.com", ["phone"])
+    assert row["retries"] == 0                           # their message was not read as a field
+
+
+@pytest.mark.parametrize("restricted,next_step", [(False, "answer"), (True, "redirect")])
+@pytest.mark.parametrize("state,guided_at", [
+    ("complete", None),
+    ("guided", "210.0"),
+    ("nudged", "210.0"),
+    ("active", "210.0"),
+    ("escalated", "210.0"),
+    ("resolved", "210.0"),
+])
+def test_a_finished_lifecycle_stays_idempotent_in_every_later_state(
+        conn, offline, monkeypatch, state, guided_at, restricted, next_step):
+    if restricted:
+        restrict_to_onboarding(monkeypatch)
+    seed_remembered_creator(conn, state, guided_at)
+    granted = record_role_assignments(monkeypatch)
+
+    out = onboarding.answer(conn, "@ava", "Can you answer a general question?", now=300.0)
+    again = onboarding.complete(conn, "@ava", now=310.0)
+
+    assert out["already_complete"] is True and out["next_step"] == next_step
+    assert again["already_complete"] is True and again["assigned"] == []
+    assert granted == [] and offline == []
+    assert onboarding.status(conn, "@ava")["onboarding_state"] == state
+
+
+def test_completed_creator_gets_the_exact_configured_redirect(conn, monkeypatch):
+    monkeypatch.setattr(brand, "config", lambda profile=None: {
+        "onboarding": {"guidance": {
+            "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
+            "getting_started": ["Introduce yourself."],
+            "how_to_reach_team": "Use #help-desk to contact the Agency Team.",
+        }}
+    })
+    monkeypatch.setattr(
+        brand,
+        "load_policy",
+        lambda profile=None: {name: False for name in brand.FEATURE_NAMES},
+    )
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.set_fields(conn, "@ava", tiktok="ava.tt")
+    onboarding.complete(conn, "@ava", now=200.0)
+
+    out = onboarding.answer(conn, "@ava", "What campaigns are active?", now=300.0)
+
+    assert out["redirect"] == (
+        "I can help with onboarding here. Use #help-desk to contact the Agency Team."
+    )
+
+
+def test_unknown_creator_context_exposes_the_exact_configured_redirect(conn, monkeypatch):
+    monkeypatch.setattr(brand, "config", lambda profile=None: {
+        "onboarding": {"guidance": {
+            "how_to_reach_team": "Use #help-desk to contact the Agency Team."
+        }}
+    })
+
+    context = onboarding.conversation_context(conn, "@unknown")
+
+    assert context["outside_scope"] == (
+        "I can help with onboarding here. Use #help-desk to contact the Agency Team."
+    )
+
+
+def test_completion_returns_bounded_profile_guidance_without_reading_yaml(conn, tmp_path, monkeypatch):
+    monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "ace"))
+    brand.write_sidecar(tmp_path, {
+        "features": {"general_qa": False},          # compiled guidance is the restricted flow
+        "onboarding": {"guidance": {
+            "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
+            "getting_started": ["Introduce yourself."],
+            "how_to_reach_team": "Ask the Agency Team in #help-desk.",
+        }}
+    })
+    onboarding.start(conn, "@ava", now=100.0)
+    store.update_onboarding(conn, "@ava", discord_id="42")
+    onboarding.answer(conn, "@ava", "ava.tt")
+    onboarding.answer(conn, "@ava", "skip")
+
+    out = onboarding.answer(conn, "@ava", "skip")
+
+    assert out["next_step"] == "guidance"
+    assert out["guidance_mode"] == "compiled"
+    assert out["guidance"]["channels"][0]["channel"] == "#start-here"
+    assert out["guidance"]["how_to_reach_team"].startswith("Ask the Agency Team")
+
+
+def test_full_feature_completion_keeps_the_prior_guidance_flow(conn, tmp_path, monkeypatch):
+    """**The bug this test exists for.** ENG-299 agent review round 4 (29 Sep 2026): a
+    full-feature brand whose knowledge file has an onboarding section was handed compiled
+    guidance, which tells the agent to skip the samples and live-campaign guidance it gave
+    before. Compiled guidance is for profiles with general Q&A disabled."""
+    monkeypatch.setenv("ACE_DATA_DIR", str(tmp_path / "ace"))
+    brand.write_sidecar(tmp_path, {
+        "onboarding": {"guidance": {
+            "channels": [{"channel": "#start-here", "purpose": "Agency setup"}],
+            "getting_started": ["Introduce yourself."],
+            "how_to_reach_team": "Ask the Agency Team in #help-desk.",
+        }}
+    })
+    onboarding.start(conn, "@ava", now=100.0)
+    store.update_onboarding(conn, "@ava", discord_id="42")
+    onboarding.answer(conn, "@ava", "ava.tt")
+    onboarding.answer(conn, "@ava", "skip")
+
+    out = onboarding.answer(conn, "@ava", "skip")
+
+    assert out["next_step"] == "guidance"
+    assert out["guidance_mode"] == "legacy_full_feature"
+    assert out["guidance"] == {}
+
+
+def test_context_exposes_only_the_current_onboarding_step(conn):
+    onboarding.start(conn, "@ava", now=100.0)
+    onboarding.answer(conn, "@ava", "ava.tt")
+    context = onboarding.conversation_context(conn, "@ava")
+    assert context == {
+        "handle": "@ava",
+        "state": "collecting",
+        "ask": "email",
+        "question": onboarding.FIELD_PROMPTS["email"],
+        "outside_scope": onboarding.ONBOARDING_REDIRECT,
+    }
 
 
 def test_one_bad_field_does_not_discard_the_good_ones_beside_it(conn):

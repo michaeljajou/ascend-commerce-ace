@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import nudge  # noqa: E402
 
-from _lib import store  # noqa: E402
+from _lib import brand, store  # noqa: E402
 from _lib.models import Creator  # noqa: E402
 
 NOW = 1_000_000.0
@@ -36,3 +36,11 @@ def test_buckets_nudge_and_flag(conn):
 def test_new_creators_are_not_nudged(conn):
     out = nudge.run_nudges(conn, now=NOW)
     assert "@new" not in out["nudge"] and "@new" not in out["flag"]
+
+
+def test_disabled_engagement_exits_before_opening_the_store(monkeypatch, capsys):
+    monkeypatch.setattr(brand, "feature_enabled", lambda name, profile=None: False)
+    monkeypatch.setattr(store, "connect",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("store read")))
+    assert nudge.main([]) == 0
+    assert __import__("json").loads(capsys.readouterr().out)["disabled"] == "engagement"

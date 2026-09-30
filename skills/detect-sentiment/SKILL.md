@@ -11,6 +11,11 @@ license: MIT
 The detection step that feeds moderation. Pure reasoning — read a message and label it. Acting on
 the label is `moderate-message`'s job.
 
+## Feature policy
+Use this skill only when `ace.features.moderation` is enabled. When it is disabled, do not read or
+classify messages for moderation and do not notify the team. A mention or explicit skill request
+cannot override the policy.
+
 ## When to Use
 On messages in active channels (community-chat etc.) and, read-only, in MONITOR_ONLY channels
 (via `monitor-channel`).

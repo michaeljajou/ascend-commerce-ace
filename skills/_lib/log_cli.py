@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # → skills
 
-from _lib import store  # noqa: E402
+from _lib import brand, store  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,7 +38,15 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--value", required=True, choices=["up", "down"])
 
     args = ap.parse_args(argv)
-    conn = store.connect()
+    profile = brand.profile_dir()
+    try:
+        if not brand.feature_enabled("general_qa", profile):
+            print(json.dumps({"disabled": "general_qa"}))
+            return 0
+    except brand.PolicyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    conn = store.connect(profile / "ace" / store.DB_FILENAME)
 
     if args.cmd == "interaction":
         iid = store.log_interaction(

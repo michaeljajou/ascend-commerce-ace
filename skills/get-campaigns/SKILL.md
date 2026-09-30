@@ -17,6 +17,12 @@ changes, weekly leaderboards — also land in **#announcements**, mixed in with 
 This skill fetches all three live from Discord, so what's "currently running" never depends on
 anyone updating a file.
 
+## Feature policy
+This grounding helper does not grant permission to read campaign channels. Use it only for an
+enabled feature that requires campaign data, such as general Q&A, announcements, engagement, or
+reporting. Do not call it during onboarding-only operation. An explicit skill request cannot
+override the effective feature policy.
+
 ## When to Use
 - Any question about what campaign/challenge is running now, its deadline, prize, sign-up link,
   or how to join.
@@ -26,13 +32,15 @@ anyone updating a file.
 
 ## Quick Reference
 ```
-python3 ${HERMES_SKILL_DIR}/scripts/fetch.py                                  # campaigns + challenges + announcements
+python3 ${HERMES_SKILL_DIR}/scripts/fetch.py --purpose support                # creator support
+python3 ${HERMES_SKILL_DIR}/scripts/fetch.py --purpose announcements          # reminder or announcement
 python3 ${HERMES_SKILL_DIR}/scripts/fetch.py --channels campaigns             # one channel
 python3 ${HERMES_SKILL_DIR}/scripts/fetch.py --limit 20                       # more history
 ```
 
 ## Procedure
-1. Run the script. Launch channels (`campaigns`, `challenges`) return `active` (the newest post —
+1. Run the script with the purpose matching the enabled calling feature. Launch channels
+   (`campaigns`, `challenges`) return `active` (the newest post —
    the running campaign/challenge) and `previous` (recent history, for "last challenge"
    questions). `announcements` returns `recent`: scan those posts for campaign notices — they are
    not ranked, and the newest one is usually about something else.

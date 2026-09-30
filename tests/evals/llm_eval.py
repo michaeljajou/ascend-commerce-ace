@@ -27,6 +27,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_ROOT = REPO_ROOT / "skills"
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 DEFAULT_KNOWLEDGE = REPO_ROOT / "tests" / "fixtures" / "pilot-brand" / "knowledge.yaml"
+ONBOARDING_ONLY_SPEC = REPO_ROOT / "tests" / "fixtures" / "synthetic-agency" / "brand.json"
+ONBOARDING_ONLY_KNOWLEDGE = (
+    REPO_ROOT / "tests" / "fixtures" / "synthetic-agency" / "knowledge.yaml"
+)
 
 MIN_PASS_RATE = 0.9
 
@@ -156,6 +160,46 @@ def _moderation_system(skills_root: Path) -> str:
     )
 
 
+# What the model must return, and nothing about which action fits which message: that has
+# to come from the generated SOUL and the bound skill, or the eval scores its own rubric.
+# "answer" and "escalate" are offered so a model following a stale rule can fail.
+ONBOARDING_ONLY_OUTPUT_CONTRACT = (
+    "Decide how Ace handles the one message, using only the instructions above and the "
+    "supplied ONBOARDING CONTEXT. Report the decision as one action: "
+    '"onboard" runs the onboarding answer step, "clarify" explains the current onboarding '
+    'question, "redirect" sends the fixed onboarding reply, "reject" sends the OVERRIDE '
+    'rejection, "silent" sends nothing, "answer" answers the question, and "escalate" '
+    "hands it to the team. For redirect and reject, copy the exact reply text from the "
+    "instructions above into reply.\n"
+    'Respond ONLY with JSON: {"action": "onboard" | "clarify" | "redirect" | "reject" | '
+    '"silent" | "answer" | "escalate", "reply": "<exact reply text, or empty>"}'
+)
+
+
+def _onboarding_only_system(skills_root: Path) -> str:
+    """Generated restricted SOUL plus the skill bound to the onboarding channel."""
+    setup_scripts = skills_root / "setup-brand" / "scripts"
+    if str(setup_scripts) not in sys.path:
+        sys.path.insert(0, str(setup_scripts))
+    import setup as setup_brand
+
+    spec = json.loads(ONBOARDING_ONLY_SPEC.read_text(encoding="utf-8"))
+    spec["onboarding"] = dict(spec["onboarding"])
+    spec["onboarding"]["enabled"] = True
+    ace_config = setup_brand.build_config(spec)
+    ace_config["onboarding"]["guidance"] = knowledge.load_knowledge(
+        ONBOARDING_ONLY_KNOWLEDGE
+    )["onboarding"]
+    soul = setup_brand.render_soul(spec, ace_config=ace_config)
+    return (
+        soul
+        + "\n\n--- BOUND SKILL ---\n\n"
+        + load_skill_body("run-onboarding", skills_root)
+        + "\n\n--- OUTPUT ---\n\n"
+        + ONBOARDING_ONLY_OUTPUT_CONTRACT
+    )
+
+
 _JUDGE_SYSTEM = (
     "You are a strict grounding judge. Given BRAND KNOWLEDGE and an ANSWER to a question, decide "
     "whether EVERY factual claim in the answer is directly supported by the knowledge. Unsupported "
@@ -251,6 +295,42 @@ def run_moderation(model: Model, cases: list[dict], skills_root: Path = SKILLS_R
     return suite
 
 
+def run_onboarding_only(
+    model: Model, cases: list[dict], skills_root: Path = SKILLS_ROOT
+) -> SuiteResult:
+    system = _onboarding_only_system(skills_root)
+    suite = SuiteResult("onboarding_only")
+    for c in cases:
+        expected = c["expect"]
+        user = (
+            "ONBOARDING CONTEXT:\n"
+            + json.dumps(c["context"], indent=2, sort_keys=True)
+            + "\n\nCREATOR MESSAGE:\n"
+            + c["message"]
+        )
+        try:
+            out = extract_json(model([
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]))
+            got = out.get("action", "")
+            reply = out.get("reply", "")
+        except ValueError as exc:
+            got = f"parse_error:{exc}"
+            reply = ""
+        expected_reply = c.get("expect_reply")
+        action_matches = got == expected
+        reply_matches = expected_reply is None or reply == expected_reply
+        passed = action_matches and reply_matches
+        detail = ""
+        if action_matches and not reply_matches:
+            detail = f"reply mismatch: expected {expected_reply!r}, got {reply!r}"
+        suite.results.append(CaseResult(
+            c["id"], passed, bool(c.get("critical")) and not passed, expected, got, detail
+        ))
+    return suite
+
+
 def run_all(
     model: Model,
     judge: Model,
@@ -266,6 +346,7 @@ def run_all(
             run_grounding(model, judge, load_cases(cases_dir / "grounding.jsonl"), kb, skills_root),
             run_classify(model, load_cases(cases_dir / "classify.jsonl"), skills_root),
             run_moderation(model, load_cases(cases_dir / "moderation.jsonl"), skills_root),
+            run_onboarding_only(model, load_cases(cases_dir / "onboarding_only.jsonl"), skills_root),
         ],
         min_pass_rate=min_pass_rate,
     )
