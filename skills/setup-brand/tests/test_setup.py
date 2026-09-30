@@ -620,6 +620,73 @@ def test_setup_compiles_only_onboarding_guidance_into_profile_artifacts(tmp_path
     assert "faq" not in json.dumps(json_ace["onboarding"]["guidance"])
 
 
+@pytest.mark.parametrize("disabled", OTHER_FEATURES)
+def test_disabling_one_other_feature_does_not_compile_guidance(disabled, tmp_path):
+    """The guidance copy follows `general_qa` alone. ENG-299 agent review round 9 (30 Sep
+    2026): the guard was pinned only for all-enabled and all-disabled policies, so a guard
+    keyed on another feature passed every test."""
+    import yaml
+
+    template = Path(__file__).resolve().parents[1] / "templates" / "knowledge.template.yaml"
+    (tmp_path / "ace").mkdir()
+    (tmp_path / "ace" / "knowledge.yaml").write_text(
+        template.read_text(encoding="utf-8"), encoding="utf-8")
+
+    written = setup.write_profile(make_spec(features={disabled: False}), tmp_path)
+
+    yaml_ace = yaml.safe_load(Path(written["config"]).read_text())["ace"]
+    json_ace = json.loads(Path(written["brand_json"]).read_text())
+    assert "guidance" not in yaml_ace["onboarding"]
+    assert "guidance" not in json_ace["onboarding"]
+
+
+def test_a_prepared_onboarding_only_profile_needs_no_knowledge_file(tmp_path):
+    """SOP Step 6 runs setup before the knowledge file exists; only activation needs it."""
+    spec = make_spec(features={name: False for name in setup.FEATURE_NAMES})
+    assert "onboarding" not in spec                     # prepared: onboarding.enabled false
+
+    written = setup.write_profile(spec, tmp_path)
+
+    json_ace = json.loads(Path(written["brand_json"]).read_text())
+    assert json_ace["onboarding"]["enabled"] is False
+    assert "guidance" not in json_ace["onboarding"]
+
+
+def test_a_prepared_profile_with_no_bounded_sections_gets_no_empty_guidance(tmp_path):
+    """A knowledge file whose onboarding section has none of the three bounded keys leaves
+    the guidance key out, as no file does; an empty mapping would read as compiled."""
+    import yaml
+
+    (tmp_path / "ace").mkdir()
+    (tmp_path / "ace" / "knowledge.yaml").write_text(
+        yaml.safe_dump({"onboarding": {"welcome": "Hi"}}), encoding="utf-8")
+
+    written = setup.write_profile(
+        make_spec(features={name: False for name in setup.FEATURE_NAMES}), tmp_path)
+
+    json_ace = json.loads(Path(written["brand_json"]).read_text())
+    assert "guidance" not in json_ace["onboarding"]
+
+
+@pytest.mark.parametrize("enabled", [False, True], ids=["prepared", "active"])
+def test_a_restricted_profile_with_an_unreadable_knowledge_file_fails_before_writing(
+        tmp_path, enabled):
+    """That file is the only post-onboarding content a restricted profile has, so a YAML
+    error in it is a setup error, not something to find at activation."""
+    import yaml
+
+    (tmp_path / "ace").mkdir()
+    (tmp_path / "ace" / "knowledge.yaml").write_text("onboarding: [unclosed\n", encoding="utf-8")
+    spec = make_spec(features={name: False for name in setup.FEATURE_NAMES},
+                     onboarding={"enabled": enabled})
+
+    with pytest.raises(yaml.YAMLError):
+        setup.write_profile(spec, tmp_path)
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["ace"]
+    assert sorted(p.name for p in (tmp_path / "ace").iterdir()) == ["knowledge.yaml"]
+
+
 def test_re_enabling_general_qa_removes_the_compiled_guidance(tmp_path):
     import yaml
 

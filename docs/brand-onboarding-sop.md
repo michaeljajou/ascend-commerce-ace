@@ -350,8 +350,10 @@ reminders target `discord:1402018857715109991`. Gateway DOWN, brand paused.
 **Verify:** For general Q&A profiles, BOTH paths: the venv (parsed) path returns a slice
 on-topic and EMPTY off-topic (the escalate signal), and the sandbox path (uid 10000,
 `/usr/bin/python3`) prints the raw file (the no-PyYAML fallback can't subset, so never test
-emptiness there). For onboarding-only profiles, setup succeeds only when the generated
-`ace.onboarding.guidance` contains channels, getting-started steps, and a human-help destination.
+emptiness there). For onboarding-only profiles, setup activates onboarding
+(`onboarding.enabled: true`) only when the generated `ace.onboarding.guidance` contains channels,
+getting-started steps, and a human-help destination; a prepared profile (`onboarding.enabled:
+false`) sets up without a knowledge file.
 
 **Live run:** ✅ 2026-08-04 I Am Joy — staged file copied in, hermes-owned; venv:
 commission query returned the FAQ slice, "wifi password" returned empty; sandbox as

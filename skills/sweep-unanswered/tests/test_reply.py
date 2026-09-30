@@ -356,10 +356,16 @@ def test_disabled_engagement_alone_refuses_an_engagement_reply(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("purpose", ["support", "onboarding", "engagement"])
-@pytest.mark.parametrize("features", [
-    {"general_qa": "false"}, {"unknown": False}, ["engagement"], None,
+@pytest.mark.parametrize("features, error", [
+    ({"general_qa": "false"}, "ace.features values must be booleans: ['general_qa']"),
+    ({"unknown": False}, "unknown ace.features names: ['unknown']"),
+    (["engagement"], "ace.features must be an object"),
+    (None, "ace.features must be an object"),
 ], ids=["string-value", "unknown-name", "list", "null"])
-def test_malformed_policy_refuses_every_reply(tmp_path, monkeypatch, capsys, purpose, features):
+def test_malformed_policy_refuses_every_reply(tmp_path, monkeypatch, capsys, purpose, features,
+                                              error):
+    """The refusal must name the policy. An onboarding reply with no creator row is refused
+    anyway, so without this the test could not tell a policy refusal from that one."""
     ace_dir = tmp_path / "ace"
     ace_dir.mkdir()
     (ace_dir / "brand.json").write_text(json.dumps({
@@ -374,7 +380,7 @@ def test_malformed_policy_refuses_every_reply(tmp_path, monkeypatch, capsys, pur
     assert reply.main(["--profile-dir", str(tmp_path), "--purpose", purpose,
                        "--channel-id", "888", "--text", "Hello"]) == 1
     captured = capsys.readouterr()
-    assert captured.out == "" and captured.err.startswith("ERROR: ")
+    assert captured.out == "" and captured.err == f"ERROR: {error}\n"
 
 
 def test_unreadable_sidecar_refuses_every_reply(tmp_path, monkeypatch, capsys):

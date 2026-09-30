@@ -364,7 +364,10 @@ def test_engagement_enabled_keeps_a_guided_thread_when_escalation_cannot_post(
 
 def test_engagement_enabled_keeps_a_guided_thread_shorter_archive_window(
         tmp_path, monkeypatch):
-    """The row guided() leaves: no last_active_at. Cleanup must not date it from guided_at."""
+    """The row guided() leaves: no last_active_at. `main` keeps its thread because cleanup
+    neither selects a guided row nor dates one from guided_at. This test fails only when
+    both change at once (the `73e17a2` tick); the test above pins the state filter alone
+    and the test below pins the cleanup date alone."""
     make_profile(tmp_path, test_mode=False)
     set_onboarding_config(tmp_path, archive_days=1)
     seed_state(tmp_path)
