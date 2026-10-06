@@ -187,6 +187,10 @@ def build_config(spec: dict) -> dict:
     # All brands share one escalation channel by default; slack_cli.py brand-tags
     # every post so the team can tell brands apart.
     cfg["slack_channel"] = spec.get("slack_channel") or _default_slack() or "#ace-escalations"
+    # The daily digest has its own channel (slack_cli defaults to #ace-digests); written only
+    # when the spec overrides it so an unchanged spec keeps producing the config `main` wrote.
+    if spec.get("digest_channel"):
+        cfg["digest_channel"] = spec["digest_channel"]
     cfg["onboarding"] = build_onboarding(spec)
     if d.get("growi_project"):
         cfg["growi_project"] = d["growi_project"]

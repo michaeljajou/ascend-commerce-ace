@@ -56,7 +56,7 @@ Then write ONE short, warm message based on what came back:
 |---|---|
 | `"ask": "<field>"` | React briefly to what they gave, then ask `question` in your own words |
 | `"ok": false` with `hint` | Re-ask that field once, warmly, guided by `hint` |
-| `"limit_reached": true` | Stop asking. The team is already paged. Tell them someone will help |
+| `"limit_reached": true` | Stop asking. Nobody is paged (the "stuck" Slack alert was removed 2026-10-06). Tell them to reply here with just their TikTok username whenever they're ready, and that the team can see this thread |
 | `"ok": true, "ask": null` | They're done and their roles are set → deliver **guidance** (below) |
 | `"needs_team": true` | Roles failed, team already paged. Say someone's finishing their access |
 | `"already_complete": true` | They finished earlier and nothing was repeated. Do not deliver guidance again. Follow `next_step`: `answer` means answer what they asked, and `redirect` is returned only when `general_qa` is disabled and means send the returned `redirect` text |
@@ -168,7 +168,8 @@ End your turn with only `[SILENT]`.
 - **Rejoins restart automatically**: anyone who left and came back gets a fresh thread and
   welcome-back from the tick, timers reset but their details remembered — `answer` picks up
   wherever they actually are.
-- Escalations (7-day quiet) are the tick's job, not yours — don't nudge anyone twice.
+- A creator still quiet after 7 days is closed out by the tick (state only — no Slack post
+  since 2026-10-06); never nudge anyone twice.
 - Don't dump every channel in guidance; three or four that matter beat eleven.
 
 ## Debugging a bad onboarding (operators, not the agent)

@@ -1,7 +1,7 @@
 ---
 name: daily-digest
-description: Post a 9 AM daily digest to the brand's Slack channel — interactions, answer rate, moderation flags, new members, upcoming deadlines.
-version: 0.3.1
+description: Post a 9 AM daily digest to the team's digest Slack channel (#ace-digests) — interactions, answer rate, moderation flags, new members, upcoming deadlines.
+version: 0.4.0
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -15,7 +15,9 @@ metadata:
 
 # Daily Digest
 
-A once-a-day summary for the team, posted to the brand's Slack channel.
+A once-a-day summary for the team, posted to the digest channel — `ace.digest_channel`,
+default `#ace-digests` (since 2026-10-06; #ace-escalations is reserved for posts that need the
+team to act). The bot must be invited to that channel or the post fails with `not_in_channel`.
 
 ## Feature policy
 Use this skill only when `ace.features.reporting` is enabled. The script validates the policy
@@ -51,4 +53,5 @@ actions, new members + how many are mid-onboarding, and upcoming deal deadlines.
 - If the window is quiet, post the digest anyway (zeros are informative) — don't skip.
 
 ## Verification
-- The Slack post shows yesterday's counts; numbers match `metrics_since` for the window.
+- The Slack post lands in the digest channel (never #ace-escalations) and shows yesterday's
+  counts; numbers match `metrics_since` for the window.

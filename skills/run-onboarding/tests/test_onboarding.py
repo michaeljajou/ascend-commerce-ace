@@ -366,15 +366,18 @@ def test_set_counts_a_retry_on_junk_and_saves_nothing(conn):
     assert onboarding.status(conn, "@ava")["tiktok"] is None
 
 
-def test_set_flags_and_pages_the_team_once_patience_runs_out(conn, offline):
+def test_set_flags_and_stops_without_paging_the_team_once_patience_runs_out(conn, offline):
+    """Requested 2026-10-06: the "Onboarding stuck" Slack alert is gone — #ace-escalations
+    holds only posts that need the team to act. The loop still stops, by state."""
     onboarding.start(conn, "@ava", now=100.0)
     for _ in range(2):
         onboarding.set_fields(conn, "@ava", tiktok="!!!")
     out = onboarding.set_fields(conn, "@ava", tiktok="!!!")
     assert out["limit_reached"] is True
     assert out["state"] == "flagged"          # the script stops the loop itself
-    assert out["team_notified"] is True
-    assert any("can't get past" in text for _key, text in offline)
+    assert "team_notified" not in out
+    assert offline == []                      # nothing reached Slack
+    assert not hasattr(onboarding, "post_stuck")
 
 
 def test_skipping_an_optional_field_is_not_a_retry(conn):
@@ -555,7 +558,7 @@ def test_answer_stops_asking_once_patience_runs_out(conn, offline):
     out = onboarding.answer(conn, "@ava", "!!!")
     assert out["limit_reached"] is True
     assert out["ask"] is None                               # nothing more to ask them
-    assert out["team_notified"] is True
+    assert "team_notified" not in out and offline == []    # no stuck alert (2026-10-06)
 
 
 def test_answer_starts_a_record_for_an_unknown_creator(conn):

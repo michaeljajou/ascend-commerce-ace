@@ -15,6 +15,13 @@ Route anything Ace shouldn't answer to the brand's Slack channel — without lea
 hanging. Used for: not-grounded logistics questions, creative-strategist requests, deal
 renegotiation, and escalated complaints.
 
+**Channel contract (team request, 2026-10-06).** #ace-escalations carries ONLY posts that
+need the team to act: the escalations above, moderation notices, and a creator locked out
+by a failed role assignment. The daily digest has its own channel (`--purpose reporting` →
+`#ace-digests`), signup cards go to `#ace-onboarding`, and the old informational notices
+("onboarding stuck", "inactive for 7 days") no longer exist. Never post a status update,
+summary, or FYI with `--purpose support`.
+
 ## Feature policy
 General support escalation is part of `ace.features.general_qa`. When that feature is disabled,
 do not acknowledge, log, or send support questions to Slack. Active onboarding may use only the

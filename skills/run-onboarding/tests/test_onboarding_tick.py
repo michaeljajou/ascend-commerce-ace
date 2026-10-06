@@ -89,14 +89,12 @@ def test_quiet_since_ignores_unparseable_stamps():
     assert tick._quiet_since({"joined_at": "100", "last_active_at": "junk"}, "joined_at") == 100.0
 
 
-def test_escalation_text_has_all_required_fields():
-    text = tick.escalation_text({
-        "handle": "@quiet", "joined_at": ts_ago(days=7), "discord_id": "42",
-        "tiktok": "q.tt", "email": None, "guided_at": ts_ago(days=6), "nudged_at": ts_ago(days=4),
-    }, "Glow Labs", NOW)
-    assert "[Glow Labs]" in text and "@quiet" in text
-    assert "7d ago" in text and "gave TikTok (q.tt)" in text and "was nudged" in text
-    assert "discord.com/users/42" in text and "✅" in text
+def test_the_tick_no_longer_talks_to_slack_at_all():
+    """Requested 2026-10-06: the "⏰ Onboarding escalation" post and its ✅-to-resolve
+    polling are gone. #ace-escalations holds only posts that need the team to act."""
+    assert not hasattr(tick, "slack")
+    assert not hasattr(tick, "escalation_text")
+    assert not hasattr(tick, "RESOLVE_EMOJI")
 
 
 # ── main(): integration with mocked REST ───────────────────────────────────────
@@ -127,8 +125,6 @@ class FakeAPIs:
         self.members = list(members)
         self.messages = messages or {}     # channel_id → list
         self.writes = []                   # (path, payload, method)
-        self.slack_calls = []
-        self.reactions = {}                # ts → [names]
         self.thread_seq = 7000
 
     def discord(self, token, path, payload=None, method=None):
@@ -153,19 +149,9 @@ class FakeAPIs:
             return [m for m in self.messages.get(cid, []) if int(m["id"]) > after]
         raise AssertionError(f"unexpected discord call: {path}")
 
-    def slack(self, token, method, payload):
-        self.slack_calls.append((method, payload))
-        if method == "chat.postMessage":
-            return {"ok": True, "channel": "C1", "ts": "111.222"}
-        if method == "reactions.get":
-            names = self.reactions.get(payload["timestamp"], [])
-            return {"ok": True, "message": {"reactions": [{"name": n} for n in names]}}
-        raise AssertionError(method)
-
 
 def run_tick(tmp_path, monkeypatch, fakes):
     monkeypatch.setattr(tick, "discord", fakes.discord)
-    monkeypatch.setattr(tick, "slack", fakes.slack)
     monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
     import io
@@ -283,7 +269,6 @@ def test_engagement_disabled_skips_completed_creator_scans_and_nudges(tmp_path, 
         return real_discord(token, path, payload, method)
 
     monkeypatch.setattr(tick, "discord", no_community_scan)
-    monkeypatch.setattr(tick, "slack", fakes.slack)
     monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
     assert tick.main(["--profile-dir", str(tmp_path)]) == 0
     assert db_row(tmp_path, "@done")["onboarding_state"] == "guided"
@@ -329,18 +314,19 @@ def set_onboarding_config(tmp_path, **values):
     cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
 
 
-def test_engagement_enabled_keeps_a_guided_thread_when_escalation_cannot_post(
+def test_engagement_enabled_keeps_the_thread_of_a_case_that_just_closed_quiet(
         tmp_path, monkeypatch):
     """**The bug this test exists for.** ENG-299 agent review round 6 (29 Sep 2026): thread
     cleanup was widened to the guided state for every profile, to close threads where
     engagement is disabled. On `main` only active and resolved threads are archived. A
     brand with engagement enabled lost the thread of a creator whose nudge was already
-    spent and whose escalation could not post, and with it the thread fallback for a
-    later nudge."""
+    spent, and with it the thread fallback for a later nudge. Since 2026-10-06 the 7-day
+    quiet case closes by state alone (no Slack post); its thread must still survive until
+    the archive window has run from that closing."""
     make_profile(tmp_path, test_mode=False)                  # real 48h / 7d / 7d windows
     seed_state(tmp_path)
     conn = tick.open_db(tmp_path)
-    # A creator who went quiet, was escalated and resolved, then finished: guided() clears
+    # A creator who went quiet, was closed and resolved, then finished: guided() clears
     # last_active_at, so resolved_at is the only date cleanup could use. Without a date
     # cleanup skips the row whatever states it selects, and the state filter goes untested.
     conn.execute(
@@ -350,15 +336,12 @@ def test_engagement_enabled_keeps_a_guided_thread_when_escalation_cannot_post(
         (ts_ago(days=20), ts_ago(days=18), ts_ago(days=8), ts_ago(days=1)))
     conn.commit()
     fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "quiet"}, "roles": []}])
-    escalations = []
-    fakes.slack = lambda token, method, payload: (
-        escalations.append(method) or {"ok": False, "error": "channel_not_found"})
 
     run_tick(tmp_path, monkeypatch, fakes)
 
     row = db_row(tmp_path, "@quiet")
-    assert escalations == ["chat.postMessage"]               # it was due, and could not post
-    assert row["onboarding_state"] == "guided" and row["thread_id"] == "7001"
+    assert row["onboarding_state"] == "escalated"            # quiet since joining: closed
+    assert row["thread_id"] == "7001"                        # closed just now: thread kept
     assert ARCHIVE_7001 not in fakes.writes
 
 
@@ -367,7 +350,7 @@ def test_engagement_enabled_keeps_a_guided_thread_shorter_archive_window(
     """The row guided() leaves: no last_active_at. `main` keeps its thread because cleanup
     neither selects a guided row nor dates one from guided_at. This test fails only when
     both change at once (the `73e17a2` tick);
-    `test_engagement_enabled_keeps_a_guided_thread_when_escalation_cannot_post` pins the
+    `test_engagement_enabled_keeps_the_thread_of_a_case_that_just_closed_quiet` pins the
     state filter alone and `test_engagement_enabled_does_not_date_an_active_thread_from_guidance`
     pins the cleanup date alone."""
     make_profile(tmp_path, test_mode=False)
@@ -447,8 +430,11 @@ def test_quiet_creator_gets_nudge_wake_once(tmp_path, monkeypatch):
     assert json.loads(out2) == {"wakeAgent": False}                      # never nudged twice
 
 
-def test_escalation_posts_to_slack_and_resolves_on_checkmark(tmp_path, monkeypatch):
-    make_profile(tmp_path)                                               # test_mode: escalate at 8 min
+def test_seven_day_quiet_closes_the_case_by_state_with_no_slack_post(tmp_path, monkeypatch):
+    """Requested 2026-10-06: nobody is paged about a creator who never engaged. The case
+    still closes (state `escalated`, dated) so it is never nudged again and `stats` counts
+    it; `onboarding.py resolve` remains the manual close."""
+    make_profile(tmp_path)                                               # test_mode: close at 8 min
     seed_state(tmp_path)
     conn = tick.open_db(tmp_path)
     conn.execute("INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, nudged_at, guided_at, joined_at)"
@@ -456,15 +442,42 @@ def test_escalation_posts_to_slack_and_resolves_on_checkmark(tmp_path, monkeypat
                  (ts_ago(minutes=5), ts_ago(minutes=8), ts_ago(minutes=9)))
     conn.commit()
     fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "silent"}, "roles": []}])
-    run_tick(tmp_path, monkeypatch, fakes)
+    out = run_tick(tmp_path, monkeypatch, fakes)
+    assert json.loads(out) == {"wakeAgent": False}
     row = db_row(tmp_path, "@silent")
-    assert row["onboarding_state"] == "escalated" and row["escalation_ts"] == "111.222"
-    method, payload = fakes.slack_calls[0]
-    assert method == "chat.postMessage" and "[Pilot]" in payload["text"]
+    assert row["onboarding_state"] == "escalated" and row["escalated_at"]
+    assert row["escalation_ts"] is None and row["escalation_channel"] is None
+    assert row["thread_id"] == "7001"                                    # kept for now
 
-    fakes.reactions["111.222"] = ["white_check_mark"]                    # team clicks ✅
+    out2 = run_tick(tmp_path, monkeypatch, fakes)                        # idempotent
+    assert json.loads(out2) == {"wakeAgent": False}
+    assert db_row(tmp_path, "@silent")["onboarding_state"] == "escalated"
+
+
+def test_a_closed_quiet_case_archives_its_thread_after_the_archive_window(
+        tmp_path, monkeypatch):
+    """With no ✅ to resolve it, a closed case must not keep its thread open forever."""
+    make_profile(tmp_path, test_mode=False)
+    seed_state(tmp_path)
+    conn = tick.open_db(tmp_path)
+    conn.execute(
+        "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
+        " escalated_at) VALUES ('@closed','escalated','77','7001',?,?)",
+        (ts_ago(days=20), ts_ago(days=8)))
+    conn.execute(
+        "INSERT INTO creators (handle, onboarding_state, discord_id, thread_id, joined_at,"
+        " escalated_at) VALUES ('@recent','escalated','78','7002',?,?)",
+        (ts_ago(days=10), ts_ago(days=2)))
+    conn.commit()
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "closed"}, "roles": []},
+                              {"user": {"id": "78", "username": "recent"}, "roles": []}])
+
     run_tick(tmp_path, monkeypatch, fakes)
-    assert db_row(tmp_path, "@silent")["onboarding_state"] == "resolved"
+
+    assert db_row(tmp_path, "@closed")["thread_id"] is None
+    assert ARCHIVE_7001 in fakes.writes
+    assert db_row(tmp_path, "@recent")["thread_id"] == "7002"            # window not yet run
+    assert ("/channels/7002", {"archived": True, "locked": False}, "PATCH") not in fakes.writes
 
 
 def test_unreadable_channel_does_not_abort_the_tick(tmp_path, monkeypatch):
@@ -487,7 +500,6 @@ def test_unreadable_channel_does_not_abort_the_tick(tmp_path, monkeypatch):
         return real_discord(token, path, payload, method)
 
     monkeypatch.setattr(tick, "discord", discord_with_403)
-    monkeypatch.setattr(tick, "slack", fakes.slack)
     monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
     import io
     from contextlib import redirect_stdout
@@ -512,7 +524,6 @@ def test_joins_only_onboards_but_never_touches_timers(tmp_path, monkeypatch):
         {"user": {"id": "77", "username": "newbie"}, "roles": []},
     ])
     monkeypatch.setattr(tick, "discord", fakes.discord)
-    monkeypatch.setattr(tick, "slack", fakes.slack)
     monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
     import io
     from contextlib import redirect_stdout
