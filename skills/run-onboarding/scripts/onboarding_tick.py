@@ -15,9 +15,12 @@ ONLY to compose nudge DMs. Everything else is plain REST + SQLite:
      (posts and commands count; reactions are a documented phase-1 gap).
   4. TIMERS  — computed from stored timestamps every tick, so downtime never silently skips:
      guided + nudge window with no engagement → nudge candidates (wake agent → DM);
-     joined + escalation window, still quiet → Slack escalation posted BY THIS SCRIPT
-     (brand-tagged, zero tokens), then ✅-reaction polling auto-resolves the case.
-  5. ARCHIVE — closed-out threads are archived after the configured window.
+     joined + escalation window, still quiet → the case closes by state (`escalated`,
+     dated) so nobody is nudged twice. Nothing is posted: the "⏰ Onboarding escalation"
+     Slack post and its ✅-to-resolve polling were removed on 2026-10-06 — the team wants
+     #ace-escalations to hold only posts that need them to act.
+  5. ARCHIVE — closed-out threads (active, resolved, closed-quiet) are archived after the
+     configured window.
 
 Master switch: ace.onboarding.enabled (default false) — the whole tick is inert until the
 operator flips it. test_mode compresses the windows to minutes for QA.
@@ -39,10 +42,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DISCORD_API = "https://discord.com/api/v10"
-SLACK_API = "https://slack.com/api"
 UA = "DiscordBot (https://github.com/michaeljajou/ascend-commerce-ace, 0.1)"
 SILENT = json.dumps({"wakeAgent": False})
-RESOLVE_EMOJI = "white_check_mark"  # ✅ on the Slack escalation = one-click resolve
 FEATURE_NAMES = {"general_qa", "moderation", "announcements", "engagement", "reporting"}
 
 # Mirror of _lib/store.py ONBOARDING_MIGRATIONS — update both together.
@@ -102,18 +103,6 @@ def discord(token: str, path: str, payload: dict | None = None, method: str | No
     with urllib.request.urlopen(req, timeout=15) as resp:
         body = resp.read().decode("utf-8")
         return json.loads(body) if body.strip() else {}
-
-
-def slack(token: str, method: str, payload: dict):
-    req = urllib.request.Request(
-        f"{SLACK_API}/{method}",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {token}",
-                 "Content-Type": "application/json; charset=utf-8", "User-Agent": "ace-onboarding/0.1"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode("utf-8"))
 
 
 def env_token(profile: Path, key: str) -> str | None:
@@ -215,27 +204,6 @@ def due_escalations(rows: list[dict], now: datetime, escalate_window: timedelta)
         if now - datetime.fromtimestamp(anchor, tz=timezone.utc) >= escalate_window:
             out.append(r)
     return out
-
-
-def escalation_text(row: dict, brand: str, now: datetime) -> str:
-    joined = datetime.fromtimestamp(float(row["joined_at"]), tz=timezone.utc)
-    days = (now - joined).days
-    done = []
-    if row.get("tiktok"):
-        done.append(f"gave TikTok ({row['tiktok']})")
-    if row.get("email"):
-        done.append("gave email")
-    if row.get("guided_at"):
-        done.append("finished guidance")
-    if row.get("nudged_at"):
-        done.append("was nudged, no response")
-    return (
-        f"[{brand}] ⏰ Onboarding escalation: *{row['handle']}* joined {days}d ago "
-        f"({joined.date().isoformat()}) and hasn't engaged anywhere in the server.\n"
-        f"So far: {', '.join(done) or 'nothing — never replied in onboarding'}.\n"
-        f"Profile: <https://discord.com/users/{row.get('discord_id') or ''}>\n"
-        f"React with ✅ once you've handled it — that closes the case."
-    )
 
 
 # ── db helpers (standalone mirror of the store contract) ──────────────────────
@@ -586,53 +554,35 @@ def main(argv: list[str] | None = None) -> int:
                          "thread_id": r["thread_id"], "nudge_via": ob.get("nudge_via", "dm"),
                          "stage": r["onboarding_state"]})
 
-        # 4b. escalations → pure-script Slack post, zero tokens
-        # (ACE_ prefix: a bare SLACK_BOT_TOKEN makes the gateway retry a Slack platform forever)
-        slack_token = env_token(profile, "ACE_SLACK_BOT_TOKEN") or env_token(profile, "SLACK_BOT_TOKEN")
+        # 4b. still quiet after the escalation window → close the case by state. No Slack
+        # post (removed 2026-10-06): the team does not want to be paged about a creator
+        # who never engaged. `escalated` + escalated_at keeps them out of every later
+        # timer and visible in `onboarding.py stats`; `resolve` is the manual close.
         for r in due_escalations(timer_rows, now, escalate_window):
-            if not slack_token:
-                print("onboarding: escalation due but no SLACK_BOT_TOKEN — skipping.", file=sys.stderr)
-                break
-            result = slack(slack_token, "chat.postMessage", {
-                "channel": ob.get("slack_channel") or ace.get("slack_channel") or "#ace-escalations",
-                "text": escalation_text(r, cfg["brand_name"], now),
-            })
-            if result.get("ok"):
-                upd(conn, r["handle"], onboarding_state="escalated",
-                    escalated_at=str(now.timestamp()),
-                    escalation_channel=result.get("channel"), escalation_ts=result.get("ts"))
-            else:
-                print(f"onboarding: Slack escalation failed: {result.get('error')}", file=sys.stderr)
-
-        # 4c. ✅ reaction on the escalation post = one-click resolve
-        if slack_token:
-            for r in rows:
-                if r["onboarding_state"] != "escalated" or not r.get("escalation_ts"):
-                    continue
-                got = slack(slack_token, "reactions.get", {
-                    "channel": r["escalation_channel"], "timestamp": r["escalation_ts"]})
-                reactions = ((got.get("message") or {}).get("reactions")) or []
-                if any(x.get("name") == RESOLVE_EMOJI for x in reactions):
-                    upd(conn, r["handle"], onboarding_state="resolved",
-                        resolved_at=str(now.timestamp()))
-                    if r.get("thread_id"):
-                        archive_thread(token, r["thread_id"])
-                    print(f"onboarding: {r['handle']} resolved via ✅.", file=sys.stderr)
+            upd(conn, r["handle"], onboarding_state="escalated",
+                escalated_at=str(now.timestamp()))
+            print(f"onboarding: {r['handle']} quiet past the window — case closed.",
+                  file=sys.stderr)
 
         # 5. archive closed-out threads after the configured window. With engagement
         # disabled nothing moves a guided creator on to active, so their thread closes
-        # from the guidance stamp. With it enabled the lifecycle is unchanged: only
-        # active and resolved threads close, dated from their own stamps.
+        # from the guidance stamp. With it enabled only active, resolved and closed-quiet
+        # threads close, dated from their own stamps — a closed-quiet case has no ✅ to
+        # resolve it any more, so its thread must not stay open forever.
         archive_after = timedelta(days=float(ob.get("archive_days", 7)))
-        closed_states = ("active", "resolved") if engagement_enabled else (
-            "guided", "active", "resolved")
+        closed_states = ("active", "resolved", "escalated") if engagement_enabled else (
+            "guided", "active", "resolved", "escalated")
         for r in conn.execute(
-            f"""SELECT handle, thread_id, last_active_at, resolved_at, guided_at FROM creators
+            f"""SELECT handle, onboarding_state, thread_id, last_active_at, resolved_at,
+                      guided_at, escalated_at
+               FROM creators
                WHERE thread_id IS NOT NULL
                AND onboarding_state IN ({",".join("?" * len(closed_states))})""",
             closed_states,
         ).fetchall():
             anchor = r["resolved_at"] or r["last_active_at"]
+            if r["onboarding_state"] == "escalated":
+                anchor = r["escalated_at"] or anchor      # dated from the closing itself
             if not engagement_enabled:
                 anchor = anchor or r["guided_at"]
             if anchor and now - datetime.fromtimestamp(float(anchor), tz=timezone.utc) >= archive_after:

@@ -5,6 +5,13 @@ All brands escalate into ONE shared Slack channel (default #ace-escalations), so
 message is automatically prefixed with the brand tag `[<brand name>]` — the team must
 always see which brand a post is about.
 
+Channel contract (team request, 2026-10-06): #ace-escalations carries ONLY posts that need
+the team to act — a creator question Ace could not ground, a creative-strategist request, a
+moderation notice, a creator locked out by a failed role assignment. The daily digest goes
+to its own channel (`--purpose reporting` → ``ace.digest_channel``, default #ace-digests);
+signup cards go to the onboarding data channel. Informational "stuck"/"inactive" notices
+were removed outright rather than rerouted.
+
 Outbound-only by design: uses the Slack Web API with SLACK_BOT_TOKEN alone. Brand
 profiles must NOT get SLACK_APP_TOKEN (a second socket-mode gateway would steal events
 from the operator's root gateway) — posting needs only the bot token in the profile
@@ -28,6 +35,7 @@ from pathlib import Path
 
 SLACK_API = "https://slack.com/api/chat.postMessage"
 DEFAULT_CHANNEL = "#ace-escalations"
+DEFAULT_DIGEST_CHANNEL = "#ace-digests"     # the daily digest never lands among escalations
 PURPOSE_FEATURE = {
     "support": "general_qa",
     "moderation": "moderation",
@@ -136,7 +144,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("post")
     p.add_argument("--text", help="message text (or use --stdin)")
     p.add_argument("--stdin", action="store_true", help="read message text from stdin")
-    p.add_argument("--channel", help="override channel (default: ace.slack_channel from config)")
+    p.add_argument("--channel", help="override channel (default: ace.slack_channel from config; "
+                                     "ace.digest_channel for --purpose reporting)")
     p.add_argument("--purpose", choices=(*PURPOSE_FEATURE, "onboarding"), default="support")
     args = ap.parse_args(argv)
 
@@ -147,7 +156,10 @@ def main(argv: list[str] | None = None) -> int:
 
     profile = profile_dir()
     ace = load_ace_config(profile)
-    channel = args.channel or ace.get("slack_channel") or DEFAULT_CHANNEL
+    if args.purpose == "reporting":
+        channel = args.channel or ace.get("digest_channel") or DEFAULT_DIGEST_CHANNEL
+    else:
+        channel = args.channel or ace.get("slack_channel") or DEFAULT_CHANNEL
     brand_module = _brand()
     try:
         policy = brand_module.load_policy(profile)

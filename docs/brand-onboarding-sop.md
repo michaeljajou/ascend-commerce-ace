@@ -224,6 +224,7 @@ and permissions complete. Residue open: bot role `Ace` at position 1 (drag above
 1. Write the spec JSON: `brand_id`, `brand_name`, `discord.guild_id` (from Step 3),
    channel behavior map (mirror an existing brand's mapping as baseline: community-chat
    POST_ANSWER, our-products ANSWER, announcements POST_ONLY, etc.), `slack_channel`,
+   optional `digest_channel` (the daily digest's channel, default `#ace-digests`),
    `model` (mirror the pilot-proven config), optional `features`, and
    **`onboarding.enabled: false`** — it flips
    to true at go-live (Step 9). `ace.onboarding.enabled` is a LIVE switch: the fleet join
@@ -406,7 +407,16 @@ Natural creators had seen the wrapper on every reminder since 9/10, and the Mond
 error to the same target as a success, so a job that posts publicly cannot fail privately.
 Hence the same-day change above: weekly-reminders delivers to the home channel and posts
 through `post.py`. Repoint a live brand with `cron edit <job_id> --deliver discord --prompt
-"<the blueprint prompt>"`.
+"<the blueprint prompt>"`. **Found 2026-10-06: that repoint had never been applied to any
+live job** — all four brands still delivered the agent's reply straight into
+`#announcements` (clean text after the wrap_response flip, but the 9/21 402 had gone
+public, and a non-`[SILENT]` reply would too). Check `Deliver:` in `cron list --all` after
+every such change; `cronjobs.yaml` is only setup's record, not the cron store.
+
+**Ask the brand before registering weekly-reminders at all.** It is a product default, and
+QBounce's team reported it on 2026-10-06 as posting they "didn't set him up to". Off per
+brand: `cron pause <job_id>`; schedule: `cron edit <job_id> --schedule "<cron>"`;
+permanently: `"features": {"announcements": false}` in `spec.json` + setup re-run.
 
 Gotchas (all bit): run cron commands as **`-u 10000 -e HOME=/opt/data`** — the cron
 store is HOME-relative, so jobs created as root live in a different store than the
@@ -613,8 +623,14 @@ thing that can ever reach `#announcements` is the reminder itself.
 **Do:** point creators at the server and spot-check
 `skills/_lib/agent_trace.py --list` for failed runs. For a full-feature profile, also watch
 Slack #ace-escalations, review repeated escalation topics for knowledge updates, and read
-the daily digest. For onboarding-only, watch #ace-onboarding and onboarding-specific
-failure alerts; do not expect support escalations or a daily digest.
+the daily digest in #ace-digests. For onboarding-only, watch #ace-onboarding and the
+role-assignment failure alert; do not expect support escalations or a daily digest.
+
+Slack channel contract (team request, 2026-10-06): **#ace-escalations** = only posts that
+need the team to act (not-grounded questions, creative-strategist routing, moderation
+notices, a creator locked out by a failed role assignment). **#ace-digests** = the daily
+digest. **#ace-onboarding** = signup cards. The "onboarding stuck" and "inactive for 7 days"
+notices were removed, not rerouted. The bot must be invited to all three channels.
 
 **Verify:** the first real creator onboards end-to-end without staff help. For full-feature
 profiles, escalations arrive formatted and brand-tagged and the digest cron is green. For

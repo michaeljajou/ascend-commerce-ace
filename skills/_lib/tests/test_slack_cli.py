@@ -11,8 +11,10 @@ import slack_cli  # noqa: E402
 
 
 def make_profile(tmp_path, *, slack_channel="#ace-escalations", brand_name="Glow Labs",
-                 features=None, onboarding=None):
+                 features=None, onboarding=None, digest_channel=None):
     ace = {"brand_id": "test-brand", "brand_name": brand_name, "slack_channel": slack_channel}
+    if digest_channel is not None:
+        ace["digest_channel"] = digest_channel
     if features is not None:
         ace["features"] = features
     if onboarding is not None:
@@ -58,6 +60,39 @@ def test_explicit_channel_override(tmp_path, monkeypatch):
     make_profile(tmp_path)
     rc, calls = run(tmp_path, monkeypatch, ["post", "--channel", "#ops", "--text", "hi"])
     assert calls["channel"] == "#ops"
+
+
+# --- #ace-escalations carries only posts that need the team to act -----------------------
+# Requested 2026-10-06: the team wants the shared escalation channel to hold nothing but
+# "Ace needs an answer" posts, and the daily digest in a channel of its own.
+
+
+def test_reporting_posts_go_to_the_digest_channel_not_escalations(tmp_path, monkeypatch):
+    make_profile(tmp_path)
+    rc, calls = run(tmp_path, monkeypatch, ["post", "--purpose", "reporting", "--text", "digest"])
+    assert rc == 0
+    assert calls["channel"] == slack_cli.DEFAULT_DIGEST_CHANNEL == "#ace-digests"
+    assert calls["text"] == "[Glow Labs] digest"            # still brand-tagged
+
+
+def test_digest_channel_is_configurable_per_brand(tmp_path, monkeypatch):
+    make_profile(tmp_path, digest_channel="#brand-reports")
+    rc, calls = run(tmp_path, monkeypatch, ["post", "--purpose", "reporting", "--text", "digest"])
+    assert rc == 0 and calls["channel"] == "#brand-reports"
+
+
+def test_explicit_channel_still_wins_for_reporting(tmp_path, monkeypatch):
+    make_profile(tmp_path, digest_channel="#brand-reports")
+    rc, calls = run(tmp_path, monkeypatch,
+                    ["post", "--purpose", "reporting", "--channel", "#ops", "--text", "digest"])
+    assert calls["channel"] == "#ops"
+
+
+def test_disabled_reporting_refuses_a_digest_post(tmp_path, monkeypatch, capsys):
+    make_profile(tmp_path, features={"reporting": False})
+    rc, calls = run(tmp_path, monkeypatch, ["post", "--purpose", "reporting", "--text", "digest"])
+    assert rc == 0 and calls == {}
+    assert json.loads(capsys.readouterr().out) == {"disabled": "reporting"}
 
 
 def test_slack_api_error_is_surfaced(tmp_path, monkeypatch, capsys):

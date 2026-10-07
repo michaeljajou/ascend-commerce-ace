@@ -34,6 +34,14 @@ def make_spec(**overrides):
     return spec
 
 
+def test_build_config_passes_the_digest_channel_through_only_when_the_spec_sets_it():
+    """The digest channel default lives in slack_cli (#ace-digests); an unchanged spec must
+    keep producing the config `main` wrote (see test_legacy_profile_output)."""
+    assert "digest_channel" not in setup.build_config(make_spec())
+    cfg = setup.build_config(make_spec(digest_channel="#brand-reports"))
+    assert cfg["digest_channel"] == "#brand-reports"
+
+
 def test_validate_spec_requires_keys():
     with pytest.raises(ValueError):
         setup.validate_spec({"brand_id": "x"})

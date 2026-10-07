@@ -50,6 +50,18 @@ When an authorized operator issues an admin action.
   Ad-hoc nudge outside the schedule: compose it per `run-onboarding` Nudge mode and send with
   `run-onboarding/scripts/send_dm.py`. The whole flow's master switch is
   `ace.onboarding.enabled` in the profile config (flip + restart the gateway).
+- **scheduled reminders (weekly-reminders)** — the Mon/Thu campaign reminder in the brand's
+  announcement channel is a Hermes cron job, operated from the VPS (`-u 10000 -e HOME=/opt/data`):
+  ```
+  hermes --profile <brand> cron list --all                         # find the job id
+  hermes --profile <brand> cron pause <job_id>                     # off (reversible)
+  hermes --profile <brand> cron resume <job_id>                    # on again
+  hermes --profile <brand> cron edit <job_id> --schedule "0 16 * * 1,4"   # change days/time (server local time, 5-field cron)
+  ```
+  To switch the whole announcements feature off for a brand (reminders AND ad-hoc
+  announcements), set `"features": {"announcements": false}` in the profile's `spec.json`,
+  re-run `setup-brand`, and pause the job — `post.py` then refuses to post even if a stale
+  job fires. QBounce asked for exactly this on 2026-10-06.
 - **configure** — channel behavior / schedules live in the profile config; re-run `setup-brand`
   to re-apply from an updated spec.
 - **add/remove brand** — adding a brand is `setup-brand` in a new profile; removing is a Hermes

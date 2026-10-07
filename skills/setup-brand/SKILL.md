@@ -51,7 +51,9 @@ marked *(portal)* live in the Discord **Developer Portal**; *(server)* items liv
 7. *(Slack)* Create **#ace-onboarding** and invite the bot (`/invite @<bot>`). Every
    completed onboarding posts the creator's captured details there, brand-tagged. Kept
    separate from #ace-escalations so signups stay scannable. Override per brand with
-   `onboarding.data_channel`. *(Optional extra: a Google Sheet mirror — paste the `doPost`
+   `onboarding.data_channel`. Also create **#ace-digests** and invite the bot: the daily
+   digest posts there (override with `digest_channel`), so that #ace-escalations carries
+   only posts that need the team to act (team request, 2026-10-06). *(Optional extra: a Google Sheet mirror — paste the `doPost`
    snippet from `_lib/sheet.py` into Apps Script, deploy as a Web app with access
    "Anyone", and set `onboarding.sheet_webhook` to the deployment URL.)*
 8. *(Access gate)* The lock lives on the **@everyone base role** (View Channels off; creator/
@@ -78,7 +80,7 @@ errors, and a members-list API call failing with `Missing Access` means the inte
 - `brand_id`, optional `brand_name`
 - `discord.guild_id`, `discord.channels` → behavior map (POST_ONLY / POST_ANSWER / ANSWER /
   FULL_ACTIVE / MONITOR_ONLY / PAID_COLLAB / AMBASSADOR / INACTIVE)
-- `slack_channel`, optional `growi_project`
+- `slack_channel`, optional `digest_channel` (default `#ace-digests`), optional `growi_project`
 - `model` (answer model), optional `classify_model`, `voice`, `brand_name`
 - optional `features` object with boolean keys `general_qa`, `moderation`, `announcements`,
   `engagement`, and `reporting`. Omitted keys default to `true`, so existing specs keep the

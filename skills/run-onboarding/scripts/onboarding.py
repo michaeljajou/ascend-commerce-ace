@@ -202,9 +202,9 @@ def set_fields(conn, handle: str, tiktok: str | None = None, email: str | None =
                "retries": bumped["retries"], "max_retries": limit,
                "limit_reached": bumped["retries"] >= limit}
         if out["limit_reached"]:
+            # Stop by state alone. The "Onboarding stuck" Slack alert was removed on
+            # 2026-10-06: #ace-escalations holds only posts that need the team to act.
             out.update(flag(conn, handle))
-            out["team_notified"] = post_stuck(
-                store.get_onboarding(conn, handle) or {}, field, raw)
         return out
 
     row = store.get_onboarding(conn, handle) or {}
@@ -549,20 +549,6 @@ def post_role_failure(row: dict, error: str) -> bool:
     return _post("\n".join(lines), key="slack_channel")
 
 
-def post_stuck(row: dict, field: str, last_answer: str) -> bool:
-    """Patience budget spent on one field. A human takes it from here."""
-    handle = row.get("handle") or "(unknown)"
-    lines = [
-        f"⚠️ *Onboarding stuck — {handle} can't get past “{field}”*",
-        f"• Last answer: “{(last_answer or '').strip()[:120]}”",
-        f"• Attempts: {row.get('retries')}",
-    ]
-    if row.get("thread_id"):
-        lines.append(f"• Thread: <https://discord.com/channels/@me/{row['thread_id']}|open>")
-    lines.append("• Ace has stopped asking and told them the team will help.")
-    return _post("\n".join(lines), key="slack_channel")
-
-
 def _post(text: str, key: str, default: str | None = None) -> bool:
     """Send one brand-tagged Slack message.
 
@@ -630,7 +616,8 @@ def reset(conn, handle: str, now: float | None = None) -> dict:
 
 
 def resolve(conn, handle: str, now: float | None = None) -> dict:
-    """Team closes an escalated case by hand (the ✅ Slack reaction does this automatically)."""
+    """Team closes a quiet (`escalated`) case by hand. The tick closes 7-day-quiet creators
+    by state alone since 2026-10-06 — there is no Slack post and no ✅ to react to."""
     store.update_onboarding(conn, handle, onboarding_state="resolved",
                             resolved_at=str(now if now is not None else time.time()))
     return {"handle": handle, "state": "resolved"}

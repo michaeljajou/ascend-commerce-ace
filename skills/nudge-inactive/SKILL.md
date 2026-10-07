@@ -1,7 +1,7 @@
 ---
 name: nudge-inactive
-description: Gently nudge creators inactive ~48h after onboarding; flag still-inactive creators (7d) to the team in Slack.
-version: 0.2.0
+description: Gently nudge creators inactive ~48h after onboarding. Creators quiet longer than 7 days are left alone — nothing is posted to Slack.
+version: 0.3.0
 author: Ascend Commerce
 license: MIT
 metadata:
@@ -9,7 +9,7 @@ metadata:
     requires_tools: [execute_code]
     blueprint:
       schedule: "0 10 * * *"   # daily 10:00
-      prompt: "Run nudge-inactive: gently nudge 48h-inactive creators and flag 7d-inactive ones to the team."
+      prompt: "Run nudge-inactive: gently nudge 48h-inactive creators. End with only [SILENT]."
 ---
 
 # Nudge Inactive
@@ -18,32 +18,31 @@ Keeps newly onboarded creators engaged. Daily cron.
 
 ## Feature policy
 Use this skill only when `ace.features.engagement` is enabled. The script validates the policy
-before reading creator activity. When disabled, do not scan activity, send post-completion nudges,
-or flag inactive completed creators. Incomplete onboarding reminders remain part of
-`run-onboarding`, not this skill.
+before reading creator activity. When disabled, do not scan activity or send post-completion
+nudges. Incomplete onboarding reminders remain part of `run-onboarding`, not this skill.
 
 ## When to Use
 Daily (blueprint). Acts only on creators who completed onboarding.
 
 ## Procedure
-1. Compute buckets:
+1. Select who is due:
    ```
-   python ${HERMES_SKILL_DIR}/scripts/nudge.py --nudge-after-h 48 --flag-after-h 168
+   python ${HERMES_SKILL_DIR}/scripts/nudge.py --nudge-after-h 48 --max-inactive-h 168
    ```
-   Output: `{"nudge": ["@..."], "flag": ["@..."]}`.
+   Output: `{"nudge": ["@..."]}`.
 2. For each `nudge` handle → send a short, friendly DM/mention pointing to something easy to do
    (introduce themselves, join the current campaign). Ground specifics with `get-knowledge`.
-3. For each `flag` handle → post a brief note to the team Slack channel so the team can reach
-   out (the script brand-tags it automatically):
-   ```
-   python ${HERMES_SKILL_DIR}/../_lib/slack_cli.py post --purpose engagement \
-     --text "<who's inactive and since when>"
-   ```
+3. End your turn with only `[SILENT]`.
+
+This skill never posts to Slack. The 7-day "still inactive" team flag was removed on
+2026-10-06: #ace-escalations holds only posts that need the team to act, and a creator who
+drifted off is not one of them.
 
 ## Pitfalls
 - Keep nudges light and infrequent — one per creator per run, never a barrage.
-- `flag` creators are not also nudged (the script already excludes them).
+- Creators quiet for more than `--max-inactive-h` are not in the output and are left alone.
 - Creators still mid-onboarding are excluded — finish onboarding first.
 
 ## Verification
-- A creator inactive 48h–7d appears in `nudge`; one inactive >7d appears in `flag`; recently active creators appear in neither.
+- A creator inactive 48h–7d appears in `nudge`; one inactive >7d and a recently active one
+  do not appear at all. Nothing reaches Slack.

@@ -57,6 +57,14 @@ On the blueprint schedule (Mon & Thu by default), as the `weekly-reminders` cron
   channel — harmless, but noise. Before 2026-09-22 the reply WAS the post, and every reminder
   reached creators wrapped in Hermes' "Cronjob Response" boilerplate plus the agent's preamble.
 
+## Turning it off, or changing the schedule
+This is a product default, not something every brand wants: QBounce's team asked on
+2026-10-06 why Ace was posting reminders they never set up. Per brand, on the VPS:
+- Off/on: `hermes --profile <brand> cron pause|resume <job_id>` (id from `cron list --all`).
+- Schedule: `cron edit <job_id> --schedule "<5-field cron>"` — server local time.
+- Permanently off: `"features": {"announcements": false}` in the brand's `spec.json` +
+  `setup-brand` re-run; `post.py` then refuses to post whatever fires it.
+
 ## Why the script posts, not the cron delivery
 Hermes has one delivery target per cron job and always delivers a failed run's error summary
 to it. While this job delivered straight into `#announcements`, the 2026-09-21 run's
