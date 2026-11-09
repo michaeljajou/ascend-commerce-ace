@@ -682,6 +682,15 @@ Apply feature changes to one profile at a time:
    after the corresponding feature is disabled.
 5. Resume only the generated Ace jobs that should be active for this profile.
 
+Turning onboarding on or off for an onboarding-only profile follows the same rule. Set
+`onboarding.enabled` in `spec.json`, re-run setup, and restart the gateway. Do not flip
+`ace.onboarding.enabled` in `config.yaml` by hand. The creator flow reads `ace/brand.json`
+and the SOUL, so a hand edit welcomed creators that Ace then never answered and never gave
+a role (ENG-662). The onboarding tick and the join listener now refuse to start
+onboarding for an onboarding-only profile while `config.yaml` and `ace/brand.json`
+disagree. A profile with general Q&A enabled still uses the config flip and a gateway
+restart.
+
 For rollback, restore the previous feature values in `spec.json` and repeat all five
 steps. Manual edits to `config.yaml` or `ace/brand.json` are not a complete rollout because
 they leave generated instructions, copied scripts, cron registration, or sessions stale.

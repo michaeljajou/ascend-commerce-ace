@@ -569,8 +569,8 @@ def post_guidance_failure(row: dict, error: str) -> bool:
     lines = [
         f"⚠️ *Onboarding guidance missing — {handle} got their roles but no guidance*",
         f"• Reason: {error}",
-        "• Send them the getting-started info by hand. Then add `onboarding.guidance` to "
-        "the knowledge file and re-run setup.",
+        ("• Send them the getting-started info by hand. Then add `onboarding.guidance` to "
+         "the knowledge file and re-run setup."),
     ]
     return _post("\n".join(lines), key="slack_channel")
 
