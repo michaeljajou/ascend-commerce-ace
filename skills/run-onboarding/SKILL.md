@@ -58,6 +58,7 @@ Then write ONE short, warm message based on what came back:
 | `"ok": false` with `hint` | Re-ask that field once, warmly, guided by `hint` |
 | `"limit_reached": true` | Stop asking. Nobody is paged (the "stuck" Slack alert was removed 2026-10-06). Tell them to reply here with just their TikTok username whenever they're ready, and that the team can see this thread |
 | `"ok": true, "ask": null` | They're done and their roles are set → deliver **guidance** (below) |
+| `"guidance_error"` present | They're done and their roles are set, but this profile has no guidance to give. The team is already alerted. Tell them they're all set and the team will share how to get started. Do not make up guidance and do not call `get-knowledge` |
 | `"needs_team": true` | Roles failed, team already paged. Say someone's finishing their access |
 | `"already_complete": true` | They finished earlier and nothing was repeated. Do not deliver guidance again. Follow `next_step`: `answer` means answer what they asked, and `redirect` is returned only when `general_qa` is disabled and means send the returned `redirect` text |
 
