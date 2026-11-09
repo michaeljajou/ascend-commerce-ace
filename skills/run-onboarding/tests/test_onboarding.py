@@ -428,7 +428,7 @@ def test_an_explicit_text_still_wins(conn, monkeypatch):
                         lambda tid: pytest.fail("should not read the thread"))
     onboarding.start(conn, "@ava", now=100.0)
     store.update_onboarding(conn, "@ava", thread_id="t1")
-    out = onboarding.answer(conn, "@ava", "realhandle")
+    onboarding.answer(conn, "@ava", "realhandle")
     assert onboarding.status(conn, "@ava")["tiktok"] == "realhandle"
 
 
