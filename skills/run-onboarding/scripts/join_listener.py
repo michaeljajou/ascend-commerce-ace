@@ -56,6 +56,26 @@ def env_token(profile: Path, key: str = "DISCORD_BOT_TOKEN") -> str | None:
     return None
 
 
+def split_onboarding_switch(profile: Path, ace: dict) -> bool:
+    """An onboarding-only profile whose config.yaml and brand.json disagree on
+    ace.onboarding.enabled. Its tick refuses to run, so listening would only wake it for
+    nothing. Mirror of onboarding_tick.split_onboarding_switch — update both together."""
+    features = ace.get("features")
+    if not isinstance(features, dict) or features.get("general_qa", True) is not False:
+        return False
+    path = profile / "ace" / "brand.json"
+    if not path.exists():
+        return False
+    try:
+        sidecar = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    if not isinstance(sidecar, dict):
+        return True
+    sidecar_on = bool((sidecar.get("onboarding") or {}).get("enabled"))
+    return bool((ace.get("onboarding") or {}).get("enabled")) != sidecar_on
+
+
 def discover(root: Path) -> list[dict]:
     """Every brand under the fleet root with onboarding enabled → its wiring."""
     import yaml
@@ -74,6 +94,11 @@ def discover(root: Path) -> list[dict]:
             continue
         ace = config.get("ace") or {}
         if not (ace.get("onboarding") or {}).get("enabled"):
+            continue
+        if split_onboarding_switch(profile, ace):
+            print(f"join-listener: skipping {profile.name} — ace.onboarding.enabled differs "
+                  "between config.yaml and ace/brand.json. Re-run setup so both agree.",
+                  file=sys.stderr)
             continue
         guild_id = str((ace.get("discord") or {}).get("guild_id") or "")
         token = env_token(profile)
