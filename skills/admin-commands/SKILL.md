@@ -49,7 +49,13 @@ When an authorized operator issues an admin action.
   ```
   Ad-hoc nudge outside the schedule: compose it per `run-onboarding` Nudge mode and send with
   `run-onboarding/scripts/send_dm.py`. The whole flow's master switch is
-  `ace.onboarding.enabled` in the profile config (flip + restart the gateway).
+  `ace.onboarding.enabled`:
+  - **General Q&A on:** flip it in the profile config and restart the gateway.
+  - **Onboarding-only (`general_qa: false`):** do not edit `config.yaml`. Set
+    `onboarding.enabled` in the profile's `spec.json`, re-run `setup.py --spec`, then
+    restart the gateway. The creator flow reads `ace/brand.json` and the SOUL, which only
+    setup writes. If `config.yaml` and `brand.json` disagree, the onboarding tick and the
+    join listener refuse to start onboarding until setup is re-run.
 - **scheduled reminders (weekly-reminders)** — the Mon/Thu campaign reminder in the brand's
   announcement channel is a Hermes cron job, operated from the VPS (`-u 10000 -e HOME=/opt/data`):
   ```

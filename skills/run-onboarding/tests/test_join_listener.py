@@ -51,3 +51,21 @@ def test_group_by_token_shares_one_connection_per_bot(tmp_path):
         "tok-shared": {"g1": "/p/a", "g2": "/p/b"},
         "tok-own": {"g3": "/p/c"},
     }
+
+
+def test_discover_skips_an_onboarding_only_brand_with_a_split_switch(tmp_path):
+    """ENG-662: config.yaml says on, but brand.json, which the agent reads, says off."""
+    import json
+
+    features = {"general_qa": False, "moderation": False, "announcements": False,
+                "engagement": False, "reporting": False}
+    for name, sidecar_on in (("split", False), ("agreed", True)):
+        profile = make_brand(tmp_path, name, guild=name, token="tok-" + name)
+        cfg = yaml.safe_load((profile / "config.yaml").read_text())
+        cfg["ace"]["features"] = features
+        (profile / "config.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+        (profile / "ace").mkdir()
+        (profile / "ace" / "brand.json").write_text(json.dumps({
+            "features": features, "onboarding": {"enabled": sidecar_on}}), encoding="utf-8")
+
+    assert [e["guild_id"] for e in jl.discover(tmp_path)] == ["agreed"]

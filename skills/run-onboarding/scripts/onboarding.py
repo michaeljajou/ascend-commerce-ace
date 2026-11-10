@@ -426,12 +426,24 @@ def answer(conn, handle: str, text: str | None = None, now: float | None = None)
 
 
 def _finish(conn, handle: str, now: float | None) -> dict:
-    """Everything asked — assign roles and hand the details to the team."""
-    guidance_context = completion_guidance_context()
-    guidance = guidance_context["guidance"]
-    done = complete(conn, handle, now=now, _guidance=guidance)
-    return {**done, "ask": None, **guidance_context,
-            "next_step": "guidance" if done.get("ok") else "hand off to the team"}
+    """Everything asked — assign roles, hand the details to the team, then build guidance.
+
+    Roles come before guidance. Guidance used to be built first, and a restricted profile
+    with no compiled guidance crashed here with the creator still locked out: no role, no
+    Slack alert, no reply (ENG-662). Now missing guidance costs only the guidance message,
+    and the team hears about it.
+    """
+    done = complete(conn, handle, now=now)
+    if not done.get("ok"):
+        return {**done, "ask": None, "next_step": "hand off to the team"}
+    try:
+        guidance_context = completion_guidance_context()
+    except brand.PolicyError as exc:
+        row = store.get_onboarding(conn, handle) or {}
+        return {**done, "ask": None, "guidance_error": str(exc),
+                "team_notified": post_guidance_failure(row, str(exc)),
+                "next_step": "confirm access"}
+    return {**done, "ask": None, **guidance_context, "next_step": "guidance"}
 
 
 def retry(conn, handle: str, ensure: Creator | None = None) -> dict:
@@ -449,7 +461,7 @@ def retry(conn, handle: str, ensure: Creator | None = None) -> dict:
 
 
 def complete(conn, handle: str, role: str = "Creator", now: float | None = None,
-             assign_roles: bool = True, _guidance: dict | None = None) -> dict:
+             assign_roles: bool = True) -> dict:
     """Finish onboarding: grant the Discord roles, then hand the details to the team.
 
     Roles come FIRST and are the gate. With the access gate on they are the creator's key
@@ -461,8 +473,9 @@ def complete(conn, handle: str, role: str = "Creator", now: float | None = None,
         raise ValueError(f"unknown creator {handle!r}; run start first")
     if not c.tiktok:
         raise ValueError("cannot complete onboarding without a tiktok username")
-    if _guidance is None:
-        completion_guidance()
+    # An unreadable feature policy still stops everything before a role is granted.
+    # Missing guidance does not: `_finish` builds it after the roles (ENG-662).
+    brand.load_policy()
     # email and phone are OPTIONAL — creators may say "skip" for either
     row = store.get_onboarding(conn, handle) or {}
     if _completed(row):
@@ -546,6 +559,19 @@ def post_role_failure(row: dict, error: str) -> bool:
         lines.append(f"• Discord: <https://discord.com/users/{row['discord_id']}|profile>")
     lines.append("• They answered everything and are waiting — grant their roles by hand, "
                  "then run `onboarding.py complete` to log the signup.")
+    return _post("\n".join(lines), key="slack_channel")
+
+
+def post_guidance_failure(row: dict, error: str) -> bool:
+    """The creator is in with their roles, but Ace had no guidance to give them. The fix
+    is the team's: add the guidance to the knowledge file and re-run setup."""
+    handle = row.get("handle") or "(unknown)"
+    lines = [
+        f"⚠️ *Onboarding guidance missing — {handle} got their roles but no guidance*",
+        f"• Reason: {error}",
+        ("• Send them the getting-started info by hand. Then add `onboarding.guidance` to "
+         "the knowledge file and re-run setup."),
+    ]
     return _post("\n".join(lines), key="slack_channel")
 
 

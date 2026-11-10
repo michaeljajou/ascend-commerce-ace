@@ -144,6 +144,36 @@ def feature_enabled(ace_config: dict, name: str) -> bool:
     return features.get(name, True)
 
 
+def split_onboarding_switch(profile: Path, ace_config: dict) -> bool:
+    """True when an onboarding-only profile's two copies of the switch disagree.
+
+    The tick reads ``ace.onboarding.enabled`` from config.yaml. The agent's script reads
+    the brand.json sidecar that setup writes. A restricted profile edited in config.yaml
+    without re-running setup welcomed creators the agent would then never answer
+    (ENG-662). A brand with general Q&A is not gated on the sidecar, so it is not checked.
+    With no sidecar the agent's script falls back to config.yaml, so there is one source.
+    An unreadable sidecar stops the agent's script, so it counts as a split.
+    Mirrored in join_listener.py — update both together.
+    """
+    path = profile / "ace" / "brand.json"
+    if feature_enabled(ace_config, "general_qa") or not path.exists():
+        return False
+    try:
+        sidecar = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    if not isinstance(sidecar, dict):
+        return True
+    sidecar_on = bool((sidecar.get("onboarding") or {}).get("enabled"))
+    return bool((ace_config.get("onboarding") or {}).get("enabled")) != sidecar_on
+
+
+SPLIT_SWITCH_MESSAGE = (
+    "onboarding: ace.onboarding.enabled differs between config.yaml and ace/brand.json for "
+    "this onboarding-only profile. Creating no threads. Re-run setup so both agree."
+)
+
+
 def is_new_joiner(member: dict, known_ids: set[str], team_role_id: str | None) -> bool:
     user = member.get("user") or {}
     if user.get("bot") or not user.get("id"):
@@ -400,13 +430,19 @@ def main(argv: list[str] | None = None) -> int:
     ob = ace.get("onboarding") or {}
     try:
         engagement_enabled = feature_enabled(ace, "engagement")
+        split_switch = split_onboarding_switch(profile, ace)
     except ValueError as exc:
         print(SILENT)
         print(f"onboarding: invalid feature policy: {exc}", file=sys.stderr)
         return 1
+    enabled = bool(ob.get("enabled")) and not split_switch
     if not args.joins_only:  # the cron run supervises the listener (start/stop with the switch)
-        ensure_listener(profile, bool(ob.get("enabled")))
-    if not ob.get("enabled"):
+        ensure_listener(profile, enabled)
+    if split_switch:
+        print(SILENT)
+        print(SPLIT_SWITCH_MESSAGE, file=sys.stderr)
+        return 0
+    if not enabled:
         print(SILENT)  # master switch off — the whole workflow is inert
         return 0
 

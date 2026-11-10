@@ -783,3 +783,43 @@ def test_escalated_leaver_moves_to_left(tmp_path, monkeypatch):
     run_tick(tmp_path, monkeypatch, fakes)
     assert db_row(tmp_path, "@quitcase")["onboarding_state"] == "left"
     assert ("/channels/7005", {"archived": True, "locked": False}, "PATCH") in fakes.writes
+
+
+ONBOARDING_ONLY = {"general_qa": False, "moderation": False, "announcements": False,
+                   "engagement": False, "reporting": False}
+
+
+def write_sidecar(tmp_path, *, enabled):
+    (tmp_path / "ace").mkdir(exist_ok=True)
+    (tmp_path / "ace" / "brand.json").write_text(json.dumps({
+        "features": ONBOARDING_ONLY, "onboarding": {"enabled": enabled}}), encoding="utf-8")
+
+
+def test_onboarding_only_profile_with_a_split_switch_creates_no_welcome_thread(
+        tmp_path, monkeypatch, capsys):
+    """**The bug this test exists for.** ENG-662 (9 Nov 2026): an operator turned onboarding
+    on in config.yaml without re-running setup. The tick welcomed creators, but the agent
+    reads brand.json, where onboarding was still off. It stayed silent, and no creator got
+    a role."""
+    make_profile(tmp_path, features=ONBOARDING_ONLY)
+    write_sidecar(tmp_path, enabled=False)
+    seed_state(tmp_path)
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "newbie"}, "roles": []}])
+
+    out = run_tick(tmp_path, monkeypatch, fakes)
+
+    assert json.loads(out) == {"wakeAgent": False}
+    assert fakes.writes == []
+    assert db_row(tmp_path, "@newbie") is None
+    assert "re-run setup" in capsys.readouterr().err.lower()
+
+
+def test_onboarding_only_profile_with_a_matching_switch_still_welcomes(tmp_path, monkeypatch):
+    make_profile(tmp_path, features=ONBOARDING_ONLY)
+    write_sidecar(tmp_path, enabled=True)
+    seed_state(tmp_path)
+    fakes = FakeAPIs(members=[{"user": {"id": "77", "username": "newbie"}, "roles": []}])
+
+    run_tick(tmp_path, monkeypatch, fakes)
+
+    assert db_row(tmp_path, "@newbie")["thread_id"] == "7001"

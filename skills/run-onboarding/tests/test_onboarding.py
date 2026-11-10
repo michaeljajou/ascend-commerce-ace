@@ -428,7 +428,7 @@ def test_an_explicit_text_still_wins(conn, monkeypatch):
                         lambda tid: pytest.fail("should not read the thread"))
     onboarding.start(conn, "@ava", now=100.0)
     store.update_onboarding(conn, "@ava", thread_id="t1")
-    out = onboarding.answer(conn, "@ava", "realhandle")
+    onboarding.answer(conn, "@ava", "realhandle")
     assert onboarding.status(conn, "@ava")["tiktok"] == "realhandle"
 
 
@@ -841,3 +841,28 @@ def test_remove_mirrors_assign_with_delete(monkeypatch):
     assert out["ok"] is True and out["removed"] == ["onboarded", "creator"]
     assert ("DELETE", "/guilds/9/members/42/roles/r1") in seen
     assert ("DELETE", "/guilds/9/members/42/roles/r2") in seen
+
+
+def test_missing_restricted_guidance_still_assigns_roles_and_alerts_the_team(
+        conn, offline, monkeypatch):
+    """**The bug this test exists for.** ENG-662 (9 Nov 2026): an onboarding-only profile
+    whose brand.json had no guidance block crashed the creator's last answer before roles
+    were assigned. No role, no Slack alert, and the creator was left in their thread."""
+    monkeypatch.setattr(brand, "load_policy",
+                        lambda profile=None: {name: False for name in brand.FEATURE_NAMES})
+    monkeypatch.setattr(brand, "config", lambda profile=None: {"onboarding": {}})
+    granted = record_role_assignments(monkeypatch)
+    onboarding.start(conn, "@ava", now=100.0)
+    store.update_onboarding(conn, "@ava", discord_id="42")
+    onboarding.answer(conn, "@ava", "ava.tt")
+    onboarding.answer(conn, "@ava", "skip")
+
+    out = onboarding.answer(conn, "@ava", "skip")
+
+    assert granted == ["42"]
+    assert out["ok"] is True
+    assert out["state"] == onboarding.COMPLETE
+    assert "guidance" not in out
+    assert "missing: channels, getting_started, how_to_reach_team" in out["guidance_error"]
+    alerts = [text for key, text in offline if key == "slack_channel"]
+    assert len(alerts) == 1 and "@ava" in alerts[0]
